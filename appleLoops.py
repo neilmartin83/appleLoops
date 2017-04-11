@@ -276,7 +276,6 @@ class AppleLoops():
             alt_plist_url = '%s%s/%s' % (self.alt_loop_feed_base_url,
                                          loop_year,
                                          plist)
-            print alt_plist_url
 
             # Split extension from the plist for folder creation
             _plist = os.path.splitext(plist)[0]
@@ -285,6 +284,7 @@ class AppleLoops():
             try:
                 request = self.request_url(plist_url)
             except:
+                print 'Failing over to %s' % alt_plist_url
                 request = self.request_url(alt_plist_url)
 
             # Process request data into dictionary
