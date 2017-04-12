@@ -151,10 +151,10 @@ class AppleLoops():
             # Will look into possibly using local copies maintained in
             # GarageBand/Logic Pro X app bundles.
             # Note - dropped support for anything prior to 2016 releases
-            self.feeds = self.request_url('https://raw.githubusercontent.com/carlashley/appleLoops/test/com.github.carlashley.appleLoops.feeds.plist')  # NOQA
+            self.feeds = self.request_url('https://raw.githubusercontent.com/carlashley/appleLoops/master/com.github.carlashley.appleLoops.feeds.plist')  # NOQA
             self.config = readPlistFromString(self.feeds.read())
             self.loop_feed_locations = self.config['loop_feeds']
-            self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content_'  # NOQA
+            self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
             self.loop_years = self.config['loop_years']
 
             self.file_choices = []

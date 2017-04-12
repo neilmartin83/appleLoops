@@ -14,9 +14,9 @@ This utility can download all the essential content required by GarageBand, Logi
 macOS with the system standard `python` and an active Internet connection.
 
 ## GarageBand first run behaviour
-The current version of GarageBand (10.1.5 as at 2017-01-19) does the following:
-- Downloads 33 'essential' packages (~1.87GB) for basic functionality
-- Prompts to download 359 optional packages (~26.49GB) for extended functionality
+The current version of GarageBand (10.1.6 as at 2017-02-13) does the following:
+- Downloads 35 'essential' packages (~1.96GB) for basic functionality
+- Prompts to download 357 optional packages (~18.62GB) for extended functionality
 
 ## Logic Pro X first run behaviour
 The current version of Logic Pro X (10.3.0 as at 2017-01-19):
@@ -24,9 +24,9 @@ The current version of Logic Pro X (10.3.0 as at 2017-01-19):
 - Has 567 optional packages (~43.73GB)
 
 ## MainStage 3 first run behaviour
-The current version of MainStage 3 (3.2.4 as at 2016-11-23):
-- Requires 35 packages of 'essential' content (~1.68GB) for basic functionality
-- Has 547 optional packages (~43.31GB)
+The current version of MainStage 3 (3.3.0 as at 2017-03-27):
+- Requires 35 packages of 'essential' content (~1.67GB) for basic functionality
+- Has 552 optional packages (~43.47GB)
 
 ### Common Content
 All three apps do have a number of packages that are shared in common, both in the essential package sets, and optional package sets.
