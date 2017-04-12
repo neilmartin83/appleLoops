@@ -151,9 +151,10 @@ class AppleLoops():
             # Will look into possibly using local copies maintained in
             # GarageBand/Logic Pro X app bundles.
             # Note - dropped support for anything prior to 2016 releases
-            self.feeds = self.request_url('https://raw.githubusercontent.com/carlashley/appleLoops/master/com.github.carlashley.appleLoops.feeds.plist')  # NOQA
+            self.feeds = self.request_url('https://raw.githubusercontent.com/carlashley/appleLoops/test/com.github.carlashley.appleLoops.feeds.plist')  # NOQA
             self.config = readPlistFromString(self.feeds.read())
             self.loop_feed_locations = self.config['loop_feeds']
+            self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content_'  # NOQA
             self.loop_years = self.config['loop_years']
 
             self.file_choices = []
@@ -272,12 +273,19 @@ class AppleLoops():
             # always match the actual package size, so check header
             # 'Content-Length' to determine correct package size.
             plist_url = self.build_url(loop_year, plist)
+            alt_plist_url = '%s%s/%s' % (self.alt_loop_feed_base_url,
+                                         loop_year,
+                                         plist)
 
             # Split extension from the plist for folder creation
             _plist = os.path.splitext(plist)[0]
 
             # URL requests
-            request = self.request_url(plist_url)
+            try:
+                request = self.request_url(plist_url)
+            except:
+                print 'Failing over to %s' % alt_plist_url
+                request = self.request_url(alt_plist_url)
 
             # Process request data into dictionary
             data = readPlistFromString(request.read())
