@@ -39,7 +39,7 @@ All three apps do have a number of packages that are shared in common, both in t
 * `./appleLoops.py --help` show all options
 * `./appleLoops.py` will download all GarageBand content (optional and mandatory)
 * `./appleLoops.py --dry-run --package-set garageband --optional-only` will do a dry run for all GarageBand optional content
-* `./appleLoops.py --package-set garageband--mandatory-only` will download all essential GarageBand content
+* `./appleLoops.py --package-set garageband --mandatory-only` will download all essential GarageBand content
 * `./appleLoops.py --package-set logicpro --mandatory-only` will download all essential Logic Pro X content
 * `./appleLoops.py --package-set mainstage --cache-server http://cache_server:port --destination ~/Desktop/loops` will download all MainStage content through the specified caching server, and store packages in the `~/Desktop/loops` folder.
 * `/.appleLoops.py --file garageband1012.plist` will download all packages found in the `garageband1012.plist` file bundled with several versions of GarageBand.
