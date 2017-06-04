@@ -24,11 +24,13 @@ import collections
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import urllib2
 from glob import glob
 from random import uniform
 from time import sleep
+from time import strftime
 from urlparse import urlparse
 
 # PyLint cannot properly find names inside Cocoa libraries, so issues bogus
@@ -89,7 +91,8 @@ class AppleLoops():
     def __init__(self, download_location=None, dry_run=True,
                  package_set=None, package_year=None,
                  mandatory_pkg=False, optional_pkg=False,
-                 caching_server=None, files_process=None, jss_mode=False):
+                 caching_server=None, files_process=None,
+                 jss_mode=False, dmg_path=None):
         try:
             if not download_location:
                 self.download_location = os.path.join('/tmp', 'appleLoops')
@@ -142,6 +145,11 @@ class AppleLoops():
                 self.jss_mode = True
             else:
                 self.jss_mode = False
+
+            if dmg_path:
+                self.dmg_path = dmg_path
+            else:
+                self.dmg_path = False
 
             # User-Agent string for this tool
             self.user_agent = 'appleLoops/%s' % __version__
@@ -617,6 +625,29 @@ class AppleLoops():
         except (KeyboardInterrupt, SystemExit):
             self.exit_out()
 
+    # This function builds a DMG using hdutil
+    def build_dmg(self, dmg_path=None):
+        '''Builds a DMG of the downloaded loops. If no source and dmg path
+        provided, source defaults to default download location when class is
+        initialised and dmg path to /tmp/appleLoops_YYYY-MM-DD.dmg.
+        Fallback unlikely to happen as the argument _must_ have a path
+        supplied as defined in the argparse in __main__.'''
+        source_path = self.download_location
+
+        if not dmg_path:
+            dmg_path = os.path.join('/tmp', 'appleLoops_%s.dmg' % strftime('%Y-%m-%d'))  # NOQA
+
+        cmd = ['/usr/bin/hdiutil', 'create', '-volname', 'appleLoops', '-srcfolder', source_path, dmg_path]  # NOQA
+
+        try:
+            if self.dry_run:
+                print 'Build %s from %s' % (dmg_path, source_path)
+            else:
+                print 'Building %s from %s' % (dmg_path, source_path)
+                subprocess.check_call(cmd)
+        except:
+            raise
+
     # This is the primary processor for the main function - only used for
     # command line based script usage
     def main_processor(self):
@@ -655,6 +686,10 @@ class AppleLoops():
                     print 'Downloaded %s packages (%s) ' % (
                         download_counter, self.convert_size(download_amount)
                     )
+
+            if self.dmg_path:
+                self.build_dmg(dmg_path=self.dmg_path)
+
         except (KeyboardInterrupt, SystemExit):
             print ''
             sys.exit(0)
@@ -706,6 +741,17 @@ def main():
 
     parser = argparse.ArgumentParser(formatter_class=SaneUsageFormat)
     exclusive_group = parser.add_mutually_exclusive_group()
+
+    # Option to build DMG
+    parser.add_argument(
+        '--build-dmg',
+        type=str,
+        nargs=1,
+        dest='build_dmg',
+        metavar='/path/to/file.dmg',
+        help='Builds a DMG of the downloaded loops.',
+        required=False
+    )
 
     # Option for cache server URL
     parser.add_argument(
@@ -841,6 +887,16 @@ def main():
     else:
         jss_output_mode = False
 
+    # DMG Path
+    if args.build_dmg and len(args.build_dmg) is 1:
+        if args.build_dmg[0].endswith('.dmg'):
+            build_dmg = args.build_dmg[0]
+        else:
+            print ('%s must end with .dmg' % args.build_dmg[0])
+            sys.exit(1)
+    else:
+        build_dmg = None
+
     # Instantiate the class AppleLoops with options
     loops = AppleLoops(download_location=store_in,
                        dry_run=args.dry_run,
@@ -850,7 +906,8 @@ def main():
                        optional_pkg=args.optional,
                        caching_server=cache_server,
                        files_process=files_to_process,
-                       jss_mode=jss_output_mode)
+                       jss_mode=jss_output_mode,
+                       dmg_path=build_dmg)
 
     loops.main_processor()
 
