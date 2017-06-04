@@ -528,9 +528,9 @@ class AppleLoops():
         directory_path = (
             os.path.join(
                 self.download_location,
-                loop.pkg_plist,  # Trying a different approach to loops
+                loop.pkg_plist  # Trying a different approach to loops
                 # loop.pkg_loop_for,
-                loop.pkg_year,
+                # loop.pkg_year,
             )
         )
         if loop.pkg_mandatory:
@@ -634,8 +634,21 @@ class AppleLoops():
         supplied as defined in the argparse in __main__.'''
         source_path = self.download_location
 
+        # If no dmg path is provided, we need a sane default location and
+        # filename.
         if not dmg_path:
             dmg_path = os.path.join('/tmp', 'appleLoops_%s.dmg' % strftime('%Y-%m-%d'))  # NOQA
+        else:
+            # Expand user or variables that might be used in the path
+            try:
+                dmg_path = os.path.expanduser(dmg_path)
+            except:
+                pass
+
+            try:
+                dmg_path = os.path.expandvar(dmg_path)
+            except:
+                pass
 
         cmd = ['/usr/bin/hdiutil', 'create', '-volname', 'appleLoops', '-srcfolder', source_path, dmg_path]  # NOQA
 
