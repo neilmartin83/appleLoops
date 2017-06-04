@@ -46,8 +46,8 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '1.1.3'
-__date__ = '2017-04-12'
+__version__ = '1.1.4'
+__date__ = '2017-06-04'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
