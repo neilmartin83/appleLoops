@@ -891,6 +891,8 @@ def main():
     # File process
     if args.plist_file:
         files_to_process = args.plist_file
+        # Sort these files so we can take advantage of duplicate files
+        files_to_process.sort()
     else:
         files_to_process = None
 
