@@ -21,6 +21,7 @@ https://github.com/munki/munki
 
 import argparse
 import collections
+import hashlib
 import os
 import shutil
 import signal
@@ -92,7 +93,8 @@ class AppleLoops():
                  package_set=None, package_year=None,
                  mandatory_pkg=False, optional_pkg=False,
                  caching_server=None, files_process=None,
-                 jss_mode=False, dmg_path=None):
+                 jss_mode=False, dmg_path=None,
+                 munki_loops_path=None):
         try:
             if not download_location:
                 self.download_location = os.path.join('/tmp', 'appleLoops')
@@ -660,6 +662,33 @@ class AppleLoops():
                 subprocess.check_call(cmd)
         except:
             raise
+
+    # Build digest for a specific file
+    def file_digest(self, file_path, digest_type=None):
+        '''Creates a digest based on the digest_type argument.
+        digest_type defaults to SHA256.'''
+        valid_digests = ['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512']
+        block_size = 65536
+
+        if not digest_type:
+            digest_type = 'sha256'
+
+        if digest_type in valid_digests:
+            h = hashlib.new(digest_type)
+            with open(file_path, 'rb') as f:
+                for block in iter(lambda: f.read(block_size), b''):
+                    h.update(block)
+                return h.hexdigest()
+        else:
+            raise Exception('%s not a valid digest - choose from %s' %
+                            (digest_type, valid_digests))
+
+    # Compare two digests
+    def compare_digests(self, digest_a, digest_b):
+        if digest_a == digest_b:
+            return True
+        else:
+            return False
 
     # This is the primary processor for the main function - only used for
     # command line based script usage
