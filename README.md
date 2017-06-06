@@ -10,6 +10,8 @@ Typically, the content is the same within minor releases, for example, the conte
 
 All three apps do have a number of packages that are shared in common, both in the essential package sets, and optional package sets.
 
+_Note_ As at 2017-06-04, there are a number of packages that are identical across _all_ versions of the loops, for example, `MAContent10_AssetPack_0443_EXS_WorldAfricanMarimba.pkg` is used in GarageBand 10.1.1 through to GarageBand 10.1.6 and is identical based on SHA256.
+
 ## What does ``appleLoops.py`` do?
 `.appleLoops.py` is a utility to _download_ the mandatory and optional packages that are normally downloaded/offered for download in the first run of any of the GarageBand, Logic Pro X, or MainStage 3 apps.
 
