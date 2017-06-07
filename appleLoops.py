@@ -94,7 +94,7 @@ class AppleLoops():
                  mandatory_pkg=False, optional_pkg=False,
                  caching_server=None, files_process=None,
                  jss_mode=False, dmg_path=None,
-                 munki_loops_path=None):
+                 munki_import=False):
         try:
             if not download_location:
                 self.download_location = os.path.join('/tmp', 'appleLoops')
@@ -166,6 +166,11 @@ class AppleLoops():
             self.loop_feed_locations = self.config['loop_feeds']
             self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
             self.loop_years = self.config['loop_years']
+
+            # Read in configuration for munki if we're importing at end of
+            # download run
+            if munki_import:
+                munkiimport_conf = readPlist('com.github.carlashley.appleLoops.config.plist')  # NOQA
 
             self.file_choices = []
             # Seriously inelegant, but it works :shrug:
