@@ -32,7 +32,7 @@
 			<key>unattendInstall</key>
 			<true/>
 			<key>updateFor</key>
-			<string>com.github.carlashley.appleLoops.app.garageband</string>
+			<string>com.github.carlashley.appleLoops.app.logic-pro</string>
 		</dict>
 		<key>mainstage</key>
 		<dict>
@@ -47,11 +47,13 @@
 			<key>unattendInstall</key>
 			<true/>
 			<key>updateFor</key>
-			<string>com.github.carlashley.appleLoops.app.garageband</string>
+			<string>com.github.carlashley.appleLoops.app.mainstage</string>
 		</dict>
 	</dict>
+    <key>pkgsinfoPath</key>
+    <string>pkgsinfo/upd/garageband1012</string>
 	<key>import_destination</key>
-	<string>/pkgs/upd</string>
+    <string>pkgs/upd/garageband1012</string>
 	<key>munkiRepoPath</key>
 	<string>/Volumes/munki_repo</string>
 	<key>munkiimportPath</key>

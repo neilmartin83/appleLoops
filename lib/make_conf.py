@@ -8,9 +8,6 @@ def make_conf(plist_dict, plist_file):
 
 
 configuration = {
-    'munkiRepoPath': '/Volumes/munki_repo',
-    'import_destination': '/pkgs/upd',
-    'munkiimportPath': '/usr/local/munkiimport',
     'importConfigs': {
         'garageband': {
             'category': 'Audio',
@@ -18,7 +15,7 @@ configuration = {
             'displayNamePrefex': 'GB_',
             'developer': 'Apple',
             'catalog': 'testing',
-            'updateFor': 'au.edu.qld.redlands.app.garageband'
+            'updateFor': 'com.github.carlashley.appleLoops.app.garageband'
         },
         'logicpro': {
             'category': 'Audio',
@@ -26,7 +23,7 @@ configuration = {
             'displayNamePrefex': 'LP_',
             'developer': 'Apple',
             'catalog': 'testing',
-            'updateFor': 'au.edu.qld.redlands.app.garageband'
+            'updateFor': 'com.github.carlashley.appleLoops.app.logic-pro'
         },
         'mainstage': {
             'category': 'Audio',
@@ -34,10 +31,13 @@ configuration = {
             'displayNamePrefex': 'MS_',
             'developer': 'Apple',
             'catalog': 'testing',
-            'updateFor': 'au.edu.qld.redlands.app.garageband'
+            'updateFor': 'com.github.carlashley.appleLoops.app.mainstage'
         },
-
-    }
+    },
+    'pkgsinfoPath': 'pkgsinfo/upd',
+    'import_destination': 'pkgs/upd',
+    'munkiRepoPath': '/Volumes/munki_repo',
+    'munkiimportPath': '/usr/local/munkiimport',
 }
 
 

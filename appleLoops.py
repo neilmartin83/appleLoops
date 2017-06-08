@@ -167,11 +167,6 @@ class AppleLoops():
             self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
             self.loop_years = self.config['loop_years']
 
-            # Read in configuration for munki if we're importing at end of
-            # download run
-            if munki_import:
-                munkiimport_conf = readPlist('com.github.carlashley.appleLoops.config.plist')  # NOQA
-
             self.file_choices = []
             # Seriously inelegant, but it works :shrug:
             for year in self.config['loop_years']:
@@ -205,8 +200,18 @@ class AppleLoops():
             self.master_list = []
             self.file_copy_master_list = []
 
+            # If importing into munki, this dict is used to collate all the
+            # info needed to sanely import
+            if munki_import:
+                self.munki_import = munki_import
+                self.import_info = {}
+
             # Download amount list
             self.download_amount = []
+
+            # Globbed path to check for duplicates for copy operations
+            self.glob_path = glob('%s/*/*/' % self.download_location)
+
         except (KeyboardInterrupt, SystemExit):
             self.exit_out()
 
@@ -268,6 +273,19 @@ class AppleLoops():
 
             if loop not in self.master_list:
                 self.master_list.append(loop)
+
+            # Add to munki import dict
+            if self.munki_import:
+                # This adds the loop into the import_info dict and defaults the
+                # value for the key to a list, then appends what app the loop
+                # is for
+                if package_name not in self.import_info.keys():
+                    self.import_info.setdefault(package_name, [])
+
+                # Only append if the loop_for doesn't exist in the key
+                if loop_for not in self.import_info[package_name]:
+                    self.import_info.setdefault(package_name, []).append(loop_for)  # NOQA
+
         except (KeyboardInterrupt, SystemExit):
             self.exit_out()
 
@@ -475,6 +493,8 @@ class AppleLoops():
                     return True
                 else:
                     return False
+            else:
+                return False
         except (KeyboardInterrupt, SystemExit):
             self.exit_out()
 
@@ -483,10 +503,8 @@ class AppleLoops():
         """Simple test to see if a duplicate file exists elsewhere in the loops
         download path."""
         try:
-            glob_path = glob('%s/*/*/*/' % self.download_location)
-
             # Test if file exists
-            for path in glob_path:
+            for path in self.glob_path:
                 if self.file_exists(loop, os.path.join(path, loop.pkg_name)):
                     return True
                 else:
@@ -499,14 +517,13 @@ class AppleLoops():
         """Used to copy a duplicate file so downloads are not wasted. Don't
         wrap this in a keyboard/system exit try statement as it could cause
         file writes to go bad."""
-        glob_path = glob('%s/*/*/*/' % self.download_location)
         local_directory = self.local_directory(loop)
         local_file = os.path.join(local_directory, loop.pkg_name)
 
         # Test if file exists, then test if the file exists and matches the
         # size it should be, if so, we can copy it.
         if not self.file_exists(loop, local_file):
-            for path in glob_path:
+            for path in self.glob_path:
                 if self.file_exists(loop, os.path.join(path, loop.pkg_name)):
                     existing_copy = os.path.join(path, loop.pkg_name)
                     if not self.dry_run:
@@ -624,7 +641,7 @@ class AppleLoops():
             else:
                 if not self.file_exists(loop, local_file):
                     print 'Download: %s - %s' % (
-                        loop.pkg_name, self.convert_size(float(loop.pkg_size))
+                        loop.pkg_name, self.convert_size(float(loop.pkg_size))  # NOQA
                     )
                     self.download_amount.append(float(loop.pkg_size))
                 else:
@@ -956,7 +973,8 @@ def main():
                        caching_server=cache_server,
                        files_process=files_to_process,
                        jss_mode=jss_output_mode,
-                       dmg_path=build_dmg)
+                       dmg_path=build_dmg,
+                       munki_import=True)
 
     loops.main_processor()
 
