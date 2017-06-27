@@ -974,7 +974,7 @@ def main():
                        files_process=files_to_process,
                        jss_mode=jss_output_mode,
                        dmg_path=build_dmg,
-                       munki_import=True)
+                       munki_import=False)
 
     loops.main_processor()
 
