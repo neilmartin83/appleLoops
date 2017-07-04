@@ -588,8 +588,8 @@ class AppleLoops():
                 #        # This function checks if the install needs to happen, and installs.  # NOQA
                 #        self.install_pkg(loop)
             else:
-                print 'Must specify either \'-m, --mandatory\' or \'-o, --optional\' to download loops.'  # NOQA
-                self.log.info('Must specify either \'-m, --mandatory\' or \'-o, --optional\' to download loops. Exiting.')  # NOQA
+                print 'Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops.'  # NOQA
+                self.log.info('Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops. Exiting.')  # NOQA
                 sys.exit(1)
 
     def loop_installed(self, pkg_id):
