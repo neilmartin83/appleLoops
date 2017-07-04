@@ -6068,7 +6068,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Atmospheric&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Atmospheric"</string>
 								<key>DisplayName</key>
 								<string>Atmospheric</string>
 							</dict>
@@ -6209,7 +6209,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala preajustes y samples adicionales para la biblioteca &quot;Basic&quot; de Alchemy</string>
+								<string>Instala preajustes y samples adicionales para la biblioteca "Basic" de Alchemy</string>
 								<key>DisplayName</key>
 								<string>Basic Additions</string>
 							</dict>
@@ -6362,7 +6362,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Cinematic&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Cinematic"</string>
 								<key>DisplayName</key>
 								<string>Cinematic</string>
 							</dict>
@@ -6521,7 +6521,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Dance&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Dance"</string>
 								<key>DisplayName</key>
 								<string>Dance</string>
 							</dict>
@@ -22961,7 +22961,7 @@
 			<key>DownloadSize</key>
 			<integer>160117748</integer>
 			<key>FileCheck</key>
-			<string>/Library/Audio/Apple Loops/Apple/01 Hip Hop/Let&apos;s Roll Beat.caf</string>
+			<string>/Library/Audio/Apple Loops/Apple/01 Hip Hop/Let's Roll Beat.caf</string>
 			<key>InstalledSize</key>
 			<integer>170432934</integer>
 			<key>IsMandatory</key>
@@ -26128,7 +26128,7 @@
 			<key>DownloadSize</key>
 			<integer>319466</integer>
 			<key>FileCheck</key>
-			<string>/Library/Application Support/Logic/Plug-In Settings/Amp Designer/01 Clean/King&apos;s Tone.pst</string>
+			<string>/Library/Application Support/Logic/Plug-In Settings/Amp Designer/01 Clean/King's Tone.pst</string>
 			<key>InstalledSize</key>
 			<integer>4551597</integer>
 			<key>IsMandatory</key>

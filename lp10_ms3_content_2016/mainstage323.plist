@@ -6047,7 +6047,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Atmospheric&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Atmospheric"</string>
 								<key>DisplayName</key>
 								<string>Atmospheric</string>
 							</dict>
@@ -6188,7 +6188,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala preajustes y samples adicionales para la biblioteca &quot;Basic&quot; de Alchemy</string>
+								<string>Instala preajustes y samples adicionales para la biblioteca "Basic" de Alchemy</string>
 								<key>DisplayName</key>
 								<string>Basic Additions</string>
 							</dict>
@@ -6341,7 +6341,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Cinematic&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Cinematic"</string>
 								<key>DisplayName</key>
 								<string>Cinematic</string>
 							</dict>
@@ -6500,7 +6500,7 @@
 						<array>
 							<dict>
 								<key>Description</key>
-								<string>Instala samples y preajustes para la biblioteca &quot;Dance&quot;</string>
+								<string>Instala samples y preajustes para la biblioteca "Dance"</string>
 								<key>DisplayName</key>
 								<string>Dance</string>
 							</dict>
