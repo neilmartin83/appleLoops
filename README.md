@@ -32,7 +32,7 @@ The deployment behaviour implemented is to only to download and install if the l
 4. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o`.
 
 ### Advanced deployment process
-1. Download loops for _all_ apps you deploy, for example: ```./appleLoops.py --apps garageband mainstage --mirror-paths --destination /Volumes/Data/apple_audio_content --mandatory --optional```
+1. Download loops for _all_ apps you deploy, for example: ```./appleLoops.py --apps garageband mainstage --mirror-paths --destination /Volumes/Data/apple_audio_content --mandatory-only --optional-only```
 2. Get the folders `lp10_ms3_content_YYYY` (where `YYYY` represents a year) onto a web server your managed Macs have access to.
 3. Steps 1-3 as per _Simple deployment process_.
 4. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o --pkg-server http://example.org/apple_loops`.
