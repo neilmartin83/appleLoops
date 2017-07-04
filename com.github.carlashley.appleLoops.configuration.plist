@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>loop_feeds</key>
+	<dict>
+		<key>garageband</key>
+		<dict>
+			<key>app_path</key>
+			<string>/Applications/GarageBand.app/Contents/Resources/garageband*.plist</string>
+			<key>loop_year</key>
+			<string>2016</string>
+			<key>plists</key>
+			<array>
+				<string>garageband1011.plist</string>
+				<string>garageband1012.plist</string>
+				<string>garageband1015.plist</string>
+				<string>garageband1016.plist</string>
+				<string>garageband1020.plist</string>
+			</array>
+		</dict>
+		<key>logicpro</key>
+		<dict>
+			<key>app_path</key>
+			<string>/Applications/Logic Pro X.app/Contents/Resources/logicpro*.plist</string>
+			<key>loop_year</key>
+			<string>2016</string>
+			<key>plists</key>
+			<array>
+				<string>logicpro1021.plist</string>
+				<string>logicpro1022.plist</string>
+				<string>logicpro1023.plist</string>
+				<string>logicpro1030.plist</string>
+			</array>
+		</dict>
+		<key>mainstage</key>
+		<dict>
+			<key>app_path</key>
+			<string>/Applications/MainStage*.app/Contents/Resources/mainstage*.plist</string>
+			<key>loop_year</key>
+			<string>2016</string>
+			<key>plists</key>
+			<array>
+				<string>mainstage323.plist</string>
+				<string>mainstage324.plist</string>
+				<string>mainstage330.plist</string>
+			</array>
+		</dict>
+	</dict>
+	<key>user_agent</key>
+	<string>appleLoops</string>
+</dict>
+</plist>

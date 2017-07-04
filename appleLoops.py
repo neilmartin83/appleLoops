@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
-"""
+'''
 Downloads required audio loops for GarageBand, Logic Pro X, and MainStage 3.
 
+------------------------------------------------------------------------------
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -17,23 +18,33 @@ limitations under the License.
 
 Elements of FoundationPlist.py are used in this tool.
 https://github.com/munki/munki
-"""
+------------------------------------------------------------------------------
 
+Requirements:
+    - python 2.7.10 (as shipped in macOS X)
+    - requests module - http://docs.python-requests.org/en/master/
+
+'''
+
+# Imports for general use
 import argparse
-import collections
-import hashlib
+import logging
 import os
-import shutil
-import signal
-import subprocess
 import sys
-import urllib2
+import shutil
+import subprocess
+try:
+    import requests
+except:
+    print 'requests module must be installed. sudo easy_install requests'
+    sys.exit(1)
+
+from collections import namedtuple
 from glob import glob
-from random import uniform
-from time import sleep
-from time import strftime
+from logging.handlers import RotatingFileHandler
 from urlparse import urlparse
 
+# Imports specifically for FoundationPlist
 # PyLint cannot properly find names inside Cocoa libraries, so issues bogus
 # No name 'Foo' in module 'Bar' warnings. Disable them.
 # pylint: disable=E0611
@@ -47,15 +58,15 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '1.1.4'
-__date__ = '2017-06-04'
+__version__ = '2.0.0'
+__date__ = '2017-06-28'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
-__status__ = 'Production'
+__status__ = 'Testing'
 
 
-# Acknowledgements to Greg Neagle and `munki` for this section of code.
+# FoundationPlist from munki
 class FoundationPlistException(Exception):
     """Basic exception for plist errors"""
     pass
@@ -66,8 +77,29 @@ class NSPropertyListSerializationException(FoundationPlistException):
     pass
 
 
+def readPlist(filepath):
+    """
+    Read a .plist file from filepath.  Return the unpacked root object
+    (which is usually a dictionary).
+    """
+    plistData = NSData.dataWithContentsOfFile_(filepath)
+    dataObject, dummy_plistFormat, error = (
+        NSPropertyListSerialization.
+        propertyListFromData_mutabilityOption_format_errorDescription_(
+            plistData, NSPropertyListMutableContainers, None, None))
+    if dataObject is None:
+        if error:
+            error = error.encode('ascii', 'ignore')
+        else:
+            error = "Unknown error"
+        errmsg = "%s in file %s" % (error, filepath)
+        raise NSPropertyListSerializationException(errmsg)
+    else:
+        return dataObject
+
+
 def readPlistFromString(data):
-    """Read a plist data from a string. Return the root object."""
+    '''Read a plist data from a string. Return the root object.'''
     try:
         plistData = buffer(data)
     except TypeError, err:
@@ -86,687 +118,624 @@ def readPlistFromString(data):
         return dataObject
 
 
+# AppleLoops
 class AppleLoops():
-    """Class contains functions for parsing Apple's plist feeds for GarageBand
-    and Logic Pro, as well as downloading loops content."""
-    def __init__(self, download_location=None, dry_run=True,
-                 package_set=None, package_year=None,
-                 mandatory_pkg=False, optional_pkg=False,
-                 caching_server=None, files_process=None,
-                 jss_mode=False, dmg_path=None,
-                 munki_import=False):
-        try:
-            if not download_location:
-                self.download_location = os.path.join('/tmp', 'appleLoops')
-            else:
-                self.download_location = download_location
+    '''
+    Manages downloads and installs of Apple audio loops for GarageBand,
+    Logic Pro X, and MainStage.
+    
+    Initialisations:
+        apps: A list, values should be any/all of: ['garageband', 'logicpro', 'mainstage']  # NOQA
+        apps_plist: A list, values should be a specific plist to process, i.e. garageband1020.plist  # NOQA
+                   These plists are found in the apps Contents/Resources folder. A local copy is kept  # NOQA
+                   in case the app can't reach the remote equivalent hosted by Apple.  # NOQA
+        caching_server: A URL string to the caching server on your network.
+                        Must be formatted: http://example.org:45698
+        destination: A string, path to save packages in, and create a DMG in (if specified).  # NOQA
+                     For example: '/Users/jappleseed/Desktop/loops'
+                     Use "" to escape paths with weird characters (like spaces).
+                     If nothing is supplied, defaults to /tmp
+        dmg_filename: A string, filename to save the DMG as.
+        dry_run: Boolean, when true, does a dummy run without downloading anything.  # NOQA
+                 Default is True.
+        mandatory_loops: Boolean, processes all mandatory loops as specified by Apple.  # NOQA
+                         Default is False.
+        optional_loops: Boolean, processes all optional loops as specified by Apple.  # NOQA
+                        Default is False.
+        quiet: Boolean, disables all stdout and stderr.
+               Default is False. Replaces JSS mode in older versions.
+                     
+    '''
+    def __init__(self, apps=None, apps_plist=None, caching_server=None,
+                 destination='/tmp', deployment_mode=False,
+                 dmg_filename=None, dry_run=True, mandatory_loops=False,
+                 mirror_paths=False, optional_loops=False, pkg_server=False,
+                 quiet_mode=False, help_init=False):
+        # Logging
+        self.log_file = '/tmp/appleLoops.log'
+        self.log = logging.getLogger('appleLoops')
+        self.log.setLevel(logging.DEBUG)
+        self.log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")  # NOQA
+        self.fh = RotatingFileHandler(self.log_file, maxBytes=(1048576*5), backupCount=7)  # NOQA Logs capped at ~5MB
+        self.fh.setFormatter(self.log_format)
+        self.log.addHandler(self.fh)
 
-            # Default to dry run
-            self.dry_run = dry_run
+        # Dry run, yo.
+        self.dry_run = dry_run
 
-            # Set package set to download
-            self.package_set = package_set
-
-            # Set package year to download
-            self.package_year = package_year
-
-            # Set mandatory package to option specified. Default is false.
-            self.mandatory_pkg = mandatory_pkg
-
-            # Set optional package to option specified. Default is false.
-            self.optional_pkg = optional_pkg
-
-            # Base URL for loops
-            # This URL needs to be re-assembled into the correct format of:
-            # http://audiocontentdownload.apple.com/lp10_ms3_content_YYYY/filename.ext
-            self.base_url = (
-                'http://audiocontentdownload.apple.com/lp10_ms3_content_'
-            )
-
-            # Configure cache server if argument is provided
-            if caching_server:
-                self.caching_server = caching_server.rstrip('/')
-
-                # Base URL needs to change
-                self.source_url = '?source=%s' % urlparse(self.base_url).netloc
-                self.cache_base_url = (
-                    '%s/lp10_ms3_content_' % self.caching_server
-                )
-            else:
-                self.caching_server = None
-
-            # Processing specific files or not
-            if files_process:
-                self.files_process = files_process
-            else:
-                self.files_process = False
-
-            # Switch JSS mode on or off (modifies output in the console to not
-            # include the percentage completed)
-            if jss_mode:
-                self.jss_mode = True
-            else:
-                self.jss_mode = False
-
-            if dmg_path:
-                self.dmg_path = dmg_path
-            else:
-                self.dmg_path = False
-
-            # User-Agent string for this tool
-            self.user_agent = 'appleLoops/%s' % __version__
-
-            # Dictionary of plist feeds to parse - these are Apple provided
-            # plists.
-            # Will look into possibly using local copies maintained in
-            # GarageBand/Logic Pro X app bundles.
-            # Note - dropped support for anything prior to 2016 releases
-            self.feeds = self.request_url('https://raw.githubusercontent.com/carlashley/appleLoops/master/com.github.carlashley.appleLoops.feeds.plist')  # NOQA
-            self.config = readPlistFromString(self.feeds.read())
-            self.loop_feed_locations = self.config['loop_feeds']
-            self.alt_loop_feed_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
-            self.loop_years = self.config['loop_years']
-
-            self.file_choices = []
-            # Seriously inelegant, but it works :shrug:
-            for year in self.config['loop_years']:
-                for app_feed in self.config['loop_feeds']:
-                    for plist in self.loop_feed_locations[app_feed][year]:
-                        # This builds the choices list for the argparse further
-                        # down
-                        if plist not in self.file_choices:
-                            self.file_choices.append(str(plist))
-
-            self.feeds.close()
-
-            # Create a named tuple for our loops master list
-            # These 'attributes' are:
-            # pkg_name = Package file name
-            # pkg_url = Package URL from Apple servers
-            # pkg_mandatory = Required package for whatever app requires it
-            # pkg_size = Package size based on it's 'Content-Length' - in bytes
-            # pkg_year = The package release year (i.e. 2016, or 2013, etc)
-            # pkg_loop_for = logicpro or garageband
-            self.Loop = collections.namedtuple('Loop', ['pkg_name',
-                                                        'pkg_url',
-                                                        'pkg_mandatory',
-                                                        'pkg_size',
-                                                        'pkg_year',
-                                                        'pkg_loop_for',
-                                                        'pkg_plist'])
-
-            # Empty list to put all the content that we're going to work on
-            # into.
-            self.master_list = []
-            self.file_copy_master_list = []
-
-            # If importing into munki, this dict is used to collate all the
-            # info needed to sanely import
-            if munki_import:
-                self.munki_import = munki_import
-                self.import_info = {}
-
-            # Download amount list
-            self.download_amount = []
-
-            # Globbed path to check for duplicates for copy operations
-            self.glob_path = glob('%s/*/*/' % self.download_location)
-
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def exit_out(self):
-        sys.exit()
-
-    def build_url(self, loop_year, filename):
-        """Builds the URL for each plist feed"""
-        try:
-            seperator = '/'
-
-            # If caching server and filename ends with '.pkg', we use a special
-            # URL format, so use self.cache_base_url instead of self.base_url
-            if self.caching_server and filename.endswith('.pkg'):
-                built_url = seperator.join([self.cache_base_url + loop_year,
-                                            filename + self.source_url])
-            else:
-                built_url = seperator.join([self.base_url + loop_year,
-                                            filename])
-
-            return built_url
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    # Wrap around urllib2 for requesting URL's because this is done often
-    # enough
-    def request_url(self, url):
-        try:
-            req = urllib2.Request(url)
-            req.add_unredirected_header('User-Agent', self.user_agent)
-            req = urllib2.urlopen(req)
-            return req
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def add_loop(self, package_name, package_url,
-                 package_mandatory, package_size,
-                 package_year, loop_for, plist):
-        """Add's the loop to the master list. A named tuple is used to make
-        referencing attributes of each loop easier."""
-        try:
-            # Apple aren't consistent with file sizes - so if the file size
-            # comes from the plist, we may need to remove characters!
-            try:
-                package_size = package_size.replace('.', '')
-            except:
-                pass
-
-            # Use the tuple Luke!
-            loop = self.Loop(
-                pkg_name=package_name,
-                pkg_url=package_url,
-                pkg_mandatory=package_mandatory,
-                pkg_size=package_size,
-                pkg_year=package_year,
-                pkg_loop_for=loop_for,
-                pkg_plist=plist
-            )
-
-            if loop not in self.master_list:
-                self.master_list.append(loop)
-
-            # Add to munki import dict
-            if self.munki_import:
-                # This adds the loop into the import_info dict and defaults the
-                # value for the key to a list, then appends what app the loop
-                # is for
-                if package_name not in self.import_info.keys():
-                    self.import_info.setdefault(package_name, [])
-
-                # Only append if the loop_for doesn't exist in the key
-                if loop_for not in self.import_info[package_name]:
-                    self.import_info.setdefault(package_name, []).append(loop_for)  # NOQA
-
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def process_plist(self, loop_year, plist):
-        """Processes the Apple plist feed. Makes use of readPlistFromString()
-        as python's native plistlib module doesn't read binary plists, which
-        Apple has used in past releases."""
-        try:
-            if self.jss_mode:
-                _jss_mode = 'on'
-            else:
-                _jss_mode = 'off'
-
-            print 'Processing items from %s and saving to %s. JSS mode %s' % (
-                            plist, self.download_location, _jss_mode
-                        )
-            # Note - the package size specified in the plist feeds doesn't
-            # always match the actual package size, so check header
-            # 'Content-Length' to determine correct package size.
-            plist_url = self.build_url(loop_year, plist)
-            alt_plist_url = '%s%s/%s' % (self.alt_loop_feed_base_url,
-                                         loop_year,
-                                         plist)
-
-            # Split extension from the plist for folder creation
-            _plist = os.path.splitext(plist)[0]
-
-            # URL requests
-            try:
-                request = self.request_url(plist_url)
-            except:
-                print 'Failing over to %s' % alt_plist_url
-                request = self.request_url(alt_plist_url)
-
-            # Process request data into dictionary
-            data = readPlistFromString(request.read())
-            loop_for = os.path.splitext(plist)[0]
-
-            # I don't like using regex, so here's a lambda to remove numbers
-            # part of the loop URL to use as an indicator for what app
-            # the loop is for
-            loop_for = ''.join(map(lambda c: '' if c in '0123456789' else c,
-                                   loop_for))
-
-            for pkg in data['Packages']:
-                name = data['Packages'][pkg]['DownloadName']
-                url = self.build_url(loop_year, name)
-
-                # The 'IsMandatory' may not exist, if it doesn't, then the
-                # package isn't mandatory, duh.
-                try:
-                    mandatory = data['Packages'][pkg]['IsMandatory']
-                except:
-                    mandatory = False
-
-                # If the package download name starts with ../ then we need to
-                # fix the URL up to point to the right path, and adjust the
-                # package name. Additionally, replace the year with the correct
-                # year
-                if name.startswith('../'):
-                    url = 'http://audiocontentdownload.apple.com/%s' % name[3:]
-                    name = os.path.basename(name)
-
-                # List comprehension to get the year
-                year = [x[-4:] for x in url.split('/') if 'lp10_ms3' in x][0]
-
-                # This step adds time to the processing of the plist
-                try:
-                    request = self.request_url(url)
-                    size = request.info().getheader('Content-Length').strip()
-
-                    # Close out the urllib2 request
-                    request.close()
-                except:
-                    size = data['Packages'][pkg]['DownloadSize']
-
-                # Add to the loops master list
-                if self.mandatory_pkg and not self.optional_pkg:
-                    if mandatory:
-                        self.add_loop(name, url, mandatory, size, year,
-                                      loop_for, _plist)
-                elif self.optional_pkg and not self.mandatory_pkg:
-                    if not mandatory:
-                        self.add_loop(name, url, mandatory, size, year,
-                                      loop_for, _plist)
-                else:
-                    pass
-
-                if not self.mandatory_pkg and not self.optional_pkg:
-                    self.add_loop(name, url, mandatory, size, year, loop_for,
-                                  _plist)
-
-            # Tidy up the urllib2 request
-            request.close()
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def build_master_list(self):
-        """This builds the master list of audio content so it (the master list)
-        can be processed in other functions. Yeah, there's some funky Big O
-        here."""
-
-        # This is where we'll check if we're processing a specific file or not
-        try:
-            # Yo dawg, heard you like for loops, so I put for loops in your for
-            # loops in your for loops
-            if self.files_process:
-                # This loops through package sets, and checks if we're only
-                # processing from a specific file, if so, just do the tango for
-                # that file.
-                for pkg_set in self.package_set:
-                    for year in self.package_year:
-                        package_plist = self.loop_feed_locations[pkg_set][year]
-                        for plist in self.files_process:
-                            if plist in package_plist:
-                                self.process_plist(year, plist)
-            else:
-                # Here we just loop through all the package sets and do the
-                # tango for everything that is defaulted to.
-                for pkg_set in self.package_set:
-                    for year in self.package_year:
-                        package_plist = self.loop_feed_locations[pkg_set][year]
-                        for plist in package_plist:
-                            self.process_plist(year, plist)
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def convert_size(self, file_size, precision=2):
-        """Converts the package file size into a human readable number."""
-        try:
-            try:
-                suffixes = ['B', 'KB', 'MB', 'GB', 'TB']
-                suffix_index = 0
-                while file_size > 1024 and suffix_index < 4:
-                    suffix_index += 1
-                    file_size = file_size/1024.0
-
-                return '%.*f%s' % (precision, file_size,
-                                   suffixes[suffix_index])
-            except Exception as e:
-                raise e
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def progress_output(self, loop, percent, human_fs, items_counter):
-        """Basic progress count that self updates while a
-        file is downloading."""
-        try:
-            try:
-                stats = 'Downloading %s: %s' % (items_counter, loop.pkg_name)
-                progress = '[%0.2f%% of %s]' % (percent, human_fs)
-                sys.stdout.write("\r%s %s" % (stats, progress))
-                sys.stdout.flush()
-            except Exception as e:
-                raise e
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    def make_storage_location(self, folder):
-        """Makes the storage location for the audio content if it doesn't exist.
-        Tries to expand paths and variables."""
-        try:
-            try:
-                folder = os.path.expanduser(folder)
-            except:
-                pass
-
-            try:
-                folder = os.path.expandvar(folder)
-            except:
-                pass
-
-            if not os.path.isdir(folder):
-                try:
-                    os.makedirs(folder)
-                except Exception as e:
-                    raise e
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    # Test if the file being downloaded exists
-    def file_exists(self, loop, local_file):
-        """Tests if the remote file already exists locally and it is the
-        correct file size. There is potential for some file size discrepancy
-        based on how many blocks the file actually takes up on local storage.
-        So some files may end up being re-downloaded as a result.
-        To get around this, calculate the number of blocks the local file
-        consumes, and compare that to the number of blocks the remote file
-        would consume."""
-        try:
-            if os.path.exists(local_file):
-                # Get the block size of the file on disk
-                block_size = os.stat(local_file).st_blksize
-
-                # Remote file size
-                remote_blocks = int(int(loop.pkg_size)/block_size)
-
-                # Local file size
-                local_blocks = int(os.path.getsize(local_file)/block_size)
-
-                # Compare if local number of blocks consumed is equal to or
-                # greater than the number of blocks the remote file will
-                # consume.
-                if local_blocks >= remote_blocks:
-                    return True
-                else:
-                    return False
-            else:
-                return False
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    # Test duplicate file
-    def duplicate_file(self, loop):
-        """Simple test to see if a duplicate file exists elsewhere in the loops
-        download path."""
-        try:
-            # Test if file exists
-            for path in self.glob_path:
-                if self.file_exists(loop, os.path.join(path, loop.pkg_name)):
-                    return True
-                else:
-                    return False
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    # Copy duplicate file, don't download
-    def copy_duplicate(self, loop, counter):
-        """Used to copy a duplicate file so downloads are not wasted. Don't
-        wrap this in a keyboard/system exit try statement as it could cause
-        file writes to go bad."""
-        local_directory = self.local_directory(loop)
-        local_file = os.path.join(local_directory, loop.pkg_name)
-
-        # Test if file exists, then test if the file exists and matches the
-        # size it should be, if so, we can copy it.
-        if not self.file_exists(loop, local_file):
-            for path in self.glob_path:
-                if self.file_exists(loop, os.path.join(path, loop.pkg_name)):
-                    existing_copy = os.path.join(path, loop.pkg_name)
-                    if not self.dry_run:
-                        # Make directories otherwise the copy operation fails
-                        self.make_storage_location(local_directory)
-                        shutil.copy2(existing_copy, local_file)
-                        print 'Copied %s of %s: %s' % (
-                            counter, len(self.master_list), existing_copy
-                        )
-                        break
-                    else:
-                        print 'Copy: %s' % existing_copy
-                        break
-        else:
+        # If deployment mode, and not a dry run, must be root to install loops.
+        if deployment_mode:
             if not self.dry_run:
-                    print 'Skipped %s of %s: %s - file exists' % (
-                        counter, len(self.master_list), loop.pkg_name
-                    )
-            else:
-                print 'Skip: %s - file exists' % loop.pkg_name
-
-    # Test if loop is mandatory or not, and return the correct local directory
-    def local_directory(self, loop):
-        """Just a quick test to see if the loop is optional or mandatory, and
-        return the correct path for either type."""
-        directory_path = (
-            os.path.join(
-                self.download_location,
-                loop.pkg_plist  # Trying a different approach to loops
-                # loop.pkg_loop_for,
-                # loop.pkg_year,
-            )
-        )
-        if loop.pkg_mandatory:
-            return os.path.join(directory_path, 'mandatory')
-        else:
-            return os.path.join(directory_path, 'optional')
-
-    # Downloads the loop file
-    def download(self, loop, counter):
-        """Downloads the loop, if the dry run option has been set, then it will
-        only output what it would download, along with the file size."""
-        try:
-            local_directory = self.local_directory(loop)
-            local_file = os.path.join(local_directory, loop.pkg_name)
-
-            # Do the download if this isn't a dry run
-            if not self.dry_run:
-                # Only create the output directory if this isn't a dry run
-                # Make the download directory
-                self.make_storage_location(local_directory)
-
-                # If the file doesn't already exist, or isn't a complete file,
-                # download it
-                if not self.file_exists(loop, local_file):
-                    try:
-                        request = self.request_url(loop.pkg_url)
-                    except Exception as e:
-                        raise e
-                    else:
-                        # Open a local file to write into in binary format
-                        local_file = open(local_file, 'wb')
-                        bytes_so_far = 0
-
-                        # This bit does the download
-                        while True:
-                            buffer = request.read(8192)
-                            if not buffer:
-                                if not self.jss_mode:
-                                    print('')
-                                break
-
-                            # Re-calculate downloaded bytes
-                            bytes_so_far += len(buffer)
-
-                            # Write out download file to the loop_file opened
-                            local_file.write(buffer)
-                            # local_file.flush()
-                            os.fsync(local_file)
-
-                            # Calculate percentage
-                            percent = (
-                                float(bytes_so_far) / float(loop.pkg_size)
-                            )
-                            percent = round(percent*100.0, 2)
-
-                            # Some files take up more space locally than
-                            # remote, so if percentage exceeds 100%, cap it.
-                            if percent >= 100.0:
-                                percent = 100.0
-
-                            # Output progress made
-                            items_count = '%s of %s' % (counter,
-                                                        len(self.master_list))
-                            if not self.jss_mode:
-                                self.progress_output(loop, percent,
-                                                     self.convert_size(float(
-                                                         loop.pkg_size)),
-                                                     items_count)
-                    finally:
-                        try:
-                            request.close()
-                            self.download_amount.append(float(loop.pkg_size))
-                        except:
-                            pass
-                        else:
-                            # Let a random sleep of 1-2 seconds happen between
-                            # each download
-                            pause = uniform(1, 2)
-                            sleep(pause)
+                if os.getuid() == 0:
+                    self.deployment_mode = True
                 else:
-                    print 'Skipped %s of %s: %s - file exists' % (
-                        counter, len(self.master_list), loop.pkg_name
-                    )
+                    print 'Must be root to run in deployment mode.'
+                    sys.exit(1)
             else:
-                if not self.file_exists(loop, local_file):
-                    print 'Download: %s - %s' % (
-                        loop.pkg_name, self.convert_size(float(loop.pkg_size))  # NOQA
-                    )
-                    self.download_amount.append(float(loop.pkg_size))
-                else:
-                    print 'Skip: %s - file exists' % loop.pkg_name
-        except (KeyboardInterrupt, SystemExit):
-            self.exit_out()
-
-    # This function builds a DMG using hdutil
-    def build_dmg(self, dmg_path=None):
-        '''Builds a DMG of the downloaded loops. If no source and dmg path
-        provided, source defaults to default download location when class is
-        initialised and dmg path to /tmp/appleLoops_YYYY-MM-DD.dmg.
-        Fallback unlikely to happen as the argument _must_ have a path
-        supplied as defined in the argparse in __main__.'''
-        source_path = self.download_location
-
-        # If no dmg path is provided, we need a sane default location and
-        # filename.
-        if not dmg_path:
-            dmg_path = os.path.join('/tmp', 'appleLoops_%s.dmg' % strftime('%Y-%m-%d'))  # NOQA
+                self.deployment_mode = True
         else:
-            # Expand user or variables that might be used in the path
-            try:
-                dmg_path = os.path.expanduser(dmg_path)
-            except:
-                pass
+            self.deployment_mode = False
 
-            try:
-                dmg_path = os.path.expandvar(dmg_path)
-            except:
-                pass
-
-        cmd = ['/usr/bin/hdiutil', 'create', '-volname', 'appleLoops', '-srcfolder', source_path, dmg_path]  # NOQA
-
+        # Read in configuration
+        self.configuration_file = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
         try:
-            if self.dry_run:
-                print 'Build %s from %s' % (dmg_path, source_path)
-            else:
-                print 'Building %s from %s' % (dmg_path, source_path)
-                subprocess.check_call(cmd)
+            # Full configuration dictionary
+            self.configuration = readPlist(self.configuration_file)
         except:
             raise
+            self.log.debug('Unable to read configuration file. Exiting.')
+            print 'Unable to read configuration file.'
+            sys.exit(1)
 
-    # Build digest for a specific file
-    def file_digest(self, file_path, digest_type=None):
-        '''Creates a digest based on the digest_type argument.
-        digest_type defaults to SHA256.'''
-        valid_digests = ['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512']
-        block_size = 65536
+        # Supported apps
+        self.supported_apps = ['garageband', 'logicpro', 'mainstage']
 
-        if not digest_type:
-            digest_type = 'sha256'
+        # Break configuration down into easier references
+        # Base URLs
+        self.base_url = 'http://audiocontentdownload.apple.com/lp10_ms3_content_'  # NOQA
+        self.alt_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
 
-        if digest_type in valid_digests:
-            h = hashlib.new(digest_type)
-            with open(file_path, 'rb') as f:
-                for block in iter(lambda: f.read(block_size), b''):
-                    h.update(block)
-                return h.hexdigest()
-        else:
-            raise Exception('%s not a valid digest - choose from %s' %
-                            (digest_type, valid_digests))
+        # GarageBand loops
+        self.garageband_loop_year = self.configuration['loop_feeds']['garageband']['loop_year']  # NOQA
+        self.garageband_loop_plists = self.configuration['loop_feeds']['garageband']['plists']  # NOQA
+        # To ensure correct version order, sort this list
+        self.garageband_loop_plists.sort()
 
-    # Compare two digests
-    def compare_digests(self, digest_a, digest_b):
-        if digest_a == digest_b:
-            return True
-        else:
-            return False
+        # Logic Pro X loops
+        self.logicpro_loop_year = self.configuration['loop_feeds']['logicpro']['loop_year']  # NOQA
+        self.logicpro_loop_plists = self.configuration['loop_feeds']['logicpro']['plists']  # NOQA
+        # To ensure correct version order, sort this list
+        self.logicpro_loop_plists.sort()
 
-    # This is the primary processor for the main function - only used for
-    # command line based script usage
-    def main_processor(self):
-        try:
-            """This is the main processor function, it should only be called in the
-            main() function - i.e. only for use by the command line."""
-            # Build master list
-            self.build_master_list()
+        # MainStage loops
+        self.mainstage_loop_year = self.configuration['loop_feeds']['mainstage']['loop_year']  # NOQA
+        self.mainstage_loop_plists = self.configuration['loop_feeds']['mainstage']['plists']  # NOQA
+        # To ensure correct version order, sort this list
+        self.mainstage_loop_plists.sort()
 
-            # Do the download, and supply counter for feedback on progress
-            counter = 1
-            download_counter = 0
-            for loop in self.master_list:
-                if self.duplicate_file(loop):
-                    self.copy_duplicate(loop, counter)
+        # List of supported plists for help output.
+        self.supported_plists = []
+        self.supported_plists.extend(self.garageband_loop_plists)
+        self.supported_plists.extend(self.logicpro_loop_plists)
+        self.supported_plists.extend(self.mainstage_loop_plists)
+        self.supported_plists = [str(plist) for plist in list(set(self.supported_plists))]  # NOQA
+        self.supported_plists.sort()
+
+        # Don't need to do a bunch of stuff just for help output.
+        if not help_init:
+            # Initialise with appropriate 'arguments'
+            if apps:
+                self.apps = apps
+            else:
+                self.apps = False
+
+            if apps_plist:
+                self.apps_plist = apps_plist
+            else:
+                self.apps_plist = False
+
+            if caching_server:
+                if caching_server.startswith('http://'):
+                    self.caching_server = caching_server.rstrip('/')
                 else:
-                    if self.jss_mode:
-                        print 'Downloading %s of %s: %s - %s' % (
-                            counter, len(self.master_list), loop.pkg_name,
-                            self.convert_size(float(loop.pkg_size))
-                        )
-                    self.download(loop, counter)
-                    download_counter += 1
-                counter += 1
+                    self.log.debug('Caching server format must be http://example.org:45698 - Exiting.')  # NOQA
+                    print 'Caching Server format must be http://example.org:45698'  # NOQA
+                    sys.exit(1)
+            else:
+                self.caching_server = False
 
-            # Additional information for end of download run
-            download_amount = sum(self.download_amount)
+            if destination:
+                # Expand any vars/user paths
+                self.destination = os.path.expanduser(os.path.expandvars(destination))  # NOQA
+
+            # Set dmg root destination
+            dmg_root_dest = os.path.dirname(self.destination)  # NOQA
+            if dmg_filename:
+                # self.dmg_filename = os.path.join(dmg_root_dest, 'appleLoops_%s.dmg' % strftime('%Y-%m-%d'))  # NOQA
+                self.dmg_filename = os.path.join(dmg_root_dest, dmg_filename)  # NOQA
+            else:
+                self.dmg_filename = False
+
+            self.mandatory_loops = mandatory_loops
+            self.mirror_paths = mirror_paths
+            self.optional_loops = optional_loops
+            self.quiet_mode = quiet_mode
+
+            self.user_agent = '%s/%s' % (self.configuration['user_agent'], __version__)  # NOQA
+
+            if pkg_server:
+                # Don't need a trailing / in this address
+                if pkg_server.startswith('http://'):
+                    self.pkg_server = pkg_server.rstrip('/')
+                elif pkg_server == 'munki':
+                    try:
+                        # This is the standard location for the munki client config  # NOQA
+                        self.pkg_server = readPlist('/Library/Preferences/ManagedInstalls.plist')['SoftwareRepoURL']  # NOQA
+                        self.log.info('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
+                    except:
+                        # If we can't find a munki server, fallback to using
+                        # Apple's servers.
+                        self.pkg_server = False
+                        self.log.debug('Falling back to use Apple servers for package downloads.')  # NOQA
+            else:
+                # If nothing is provided
+                self.pkg_server = False
+                self.log.debug('No package server provided, falling back to use Apple servers for package downloads.')  # NOQA
+
+            # Creating a list of files found in destination
+            self.files_found = []
+            for root, dirs, files in os.walk(self.destination, topdown=True):
+                for name in files:
+                    if name.endswith('.pkg'):
+                        _file = os.path.join(root, name)
+                        if _file not in self.files_found:
+                            self.files_found.append(_file)
+
+            # Named tuple for loops
+            self.Loop = namedtuple('Loop', ['pkg_name',
+                                            'pkg_url',
+                                            'pkg_mandatory',
+                                            'pkg_size',
+                                            'pkg_year',
+                                            'pkg_loop_for',
+                                            'pkg_plist',
+                                            'pkg_id',
+                                            'pkg_installed',
+                                            'pkg_destination'])
+
+    def main_processor(self):
+        # Some feedback to stdout for CLI use
+        if not self.quiet_mode:
+            if self.mirror_paths:
+                print 'Loops downloading to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
+                self.log.info('Loops downloading to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+            else:
+                print 'Loops downloading to: %s' % self.destination
+                self.log.info('Loops downloading to: %s' % self.destination)
+
+            if self.caching_server:
+                print 'Caching Server: %s' % self.caching_server
+                self.log.info('Caching server: %s' % self.caching_server)
+
+            if self.dmg_filename:
+                print 'DMG path: %s' % self.dmg_filename
+                self.log.info('DMG path: %s' % self.dmg_filename)
+
+        # If there are local plists, lets get the basenames because
+        # this will be useful for munki install runs.
+        # This globs the path for the local plist, which is a blunt
+        # approach. If Apple changes the filenames for any of these
+        # apps, this approach will fail spectacularly. Will need to
+        # Find a better way of approaching this.
+        # deployment_mode should only be used by itself.
+        if self.deployment_mode:
+            if not any([self.apps, self.apps_plist]):
+                for app in self.supported_apps:
+                    try:
+                        urls = self.plist_url(app)
+                        self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
+                    except:
+                        # If there is an exception, it's likely because the plist for the app doesn't exist. Skip.  # NOQA
+                        pass
+            else:
+                print 'Can\'t use apps or app_plist with deployment_mode.'
+                self.log.info('Can\'t use apps or app_plist with deployment mode.')  # NOQA
+                sys.exit(1)
+
+        # Handle where just an app name is provided. This will default
+        # to getting the loop content for the latest version.
+        if self.apps:
+            # Check if .plist exists in self.apps
+            if '.plist' in self.apps:
+                print 'Please remove the .plist extension.'
+                sys.exit(1)
+
+            if not any([self.apps_plist, self.deployment_mode]):
+                for app in self.apps:
+                    if any(app in x for x in self.supported_apps):  # NOQA
+                        if 'garageband' in app:
+                            for plist in self.garageband_loop_plists:
+                                apple_url = '%s%s/%s' % (self.base_url, self.garageband_loop_year, plist)  # NOQA
+                                fallback_url = '%s%s/%s' % (self.alt_base_url, self.garageband_loop_year, plist)  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+
+                        if 'logicpro' in app:
+                            for plist in self.logicpro_loop_plists:
+                                apple_url = '%s%s/%s' % (self.base_url, self.logicpro_loop_year, plist)  # NOQA
+                                fallback_url = '%s%s/%s' % (self.alt_base_url, self.logicpro_loop_year, plist)  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+
+                        if 'mainstage' in app:
+                            for plist in self.mainstage_loop_plists:
+                                apple_url = '%s%s/%s' % (self.base_url, self.mainstage_loop_year, plist)  # NOQA
+                                fallback_url = '%s%s/%s' % (self.alt_base_url, self.mainstage_loop_year, plist)  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+            else:
+                print 'Can\'t use apps_plist or deployment_mode with app mode.'
+                sys.log.info('Can\'t use apps_plist or deployment_mode with app mode.')  # NOQA
+                sys.exit(1)
+
+        if self.apps_plist:
+            if not any([self.apps, self.deployment_mode]):
+                for plist in self.apps_plist:
+                    # Strip numbers from plist name to get app name
+                    app = ''.join(map(lambda c: '' if c in '0123456789' else c, plist.replace('.plist', '')))  # NOQA
+                    app_year = self.configuration['loop_feeds'][app]['loop_year']  # NOQA
+                    apple_url = '%s%s/%s' % (self.base_url, app_year, plist)
+                    fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, plist)  # NOQA
+                    self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+            else:
+                print 'Can\'t use apps or deployment_mode with apps_plist.'
+                sys.log.info('Can\'t use apps or deployment_mode with apps_plist.')  # NOQA
+                sys.exit(1)
+
+        if self.dmg_filename:
+            self.build_dmg(self.dmg_filename)
+
+    # Functions
+    def plist_url(self, app):
+        '''Returns a namedtuple with the Apple URL and a fallback URL. These URLs are the feed containing the pkg info.'''  # NOQA
+        if self.deployment_mode:
+            app_year = '2016'
+        else:
+            app_year = self.configuration['loop_feeds'][app]['loop_year']
+
+        app_plist = os.path.basename(glob(self.configuration['loop_feeds'][app]['app_path'])[0])  # NOQA
+        apple_url = '%s%s/%s' % (self.base_url, app_year, app_plist)  # NOQA
+        fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, app_plist)
+        PlistURLs = namedtuple('PlistURls', ['apple', 'fallback'])
+
+        if not self.quiet_mode:
+            print 'Processing loops from: %s' % app_plist
+            self.log.info('Processing loops from: %s' % app_plist)
+
+        return PlistURLs(
+            apple=apple_url,
+            fallback=fallback_url
+        )
+
+    def get_feed(self, apple_url, fallback_url):
+        '''Returns the feed as a dictionary from either the Apple URL or the fallback URL, pending result code.'''  # NOQA
+        # Initalise request, and check for 404's
+        req = requests.head(apple_url)  # request.head for speed
+        if req.status_code == 404:
+            # Use fallback URL
+            self.log.debug('Falling back to alternate feed: %s' % fallback_url)  # NOQA
+            req = requests.head(fallback_url)  # request.head for speed
+            if req.status_code == 200:
+                req = {
+                    'app_feed_file': os.path.basename(fallback_url),
+                    'result': readPlistFromString(requests.get(fallback_url, stream=True).raw.read())  # NOQA
+                }
+                return req
+            else:
+                self.log.info('There was a problem trying to reach %s' % fallback_url)  # NOQA
+                return Exception('There was a problem trying to reach %s' % fallback_url)  # NOQA
+        elif req.status_code == 200:
+            # Use Apple URL
+            req = {
+                'app_feed_file': os.path.basename(apple_url),
+                'result': readPlistFromString(requests.get(apple_url, stream=True).raw.read())  # NOQA
+            }
+            return req
+        else:
+            self.log.info('There was a problem trying to reach %s' % apple_url)  # NOQA
+            return Exception('There was a problem trying to reach %s' % apple_url)  # NOQA
+
+    def process_pkgs(self, app_feed_dict):
+        # Specific part of the app_feed_dict to process
+        packages = app_feed_dict['result']['Packages']
+
+        # Values to put in the Loop named tuple
+        _pkg_loop_for = ''.join(map(lambda c: '' if c in '0123456789' else c, os.path.splitext(app_feed_dict['app_feed_file'])[0]))  # NOQA
+        _pkg_plist = app_feed_dict['app_feed_file']
+
+        _pkg_year = self.configuration['loop_feeds'][_pkg_loop_for]['loop_year']  # NOQA
+
+        for pkg in packages:
+            _pkg_name = packages[pkg]['DownloadName']
+            _pkg_url = '%s%s/%s' % (self.base_url, _pkg_year, _pkg_name)
+
+            # Reformat URL if caching server specified
+            if self.caching_server:
+                _pkg_url = urlparse(_pkg_url)
+                _pkg_url = '%s%s?source=%s' % (self.caching_server, _pkg_url.path, _pkg_url.netloc)  # NOQA
+
+            _pkg_destination_folder_year = _pkg_year
+
+            # Some package names start with ../lp10_ms3_content_2013/
+            if _pkg_name.startswith('../'):
+                # When setting the destination path for mirroring, need to have the correct year  # NOQA
+                if '2013' in _pkg_name and self.mirror_paths:
+                    _pkg_destination_folder_year = '2013'
+
+                _pkg_url = 'http://audiocontentdownload.apple.com/%s' % _pkg_name[3:]  # NOQA
+                _pkg_name = os.path.basename(_pkg_name)
+
+            # If pkg_server is true, and deployment_mode has a list, use that
+            # instead of Apple servers. Important note, the pkg_server must
+            # have the same `lp10_ms3_content_YYYY` folder structure. i.e.
+            # http://munki.example.org/munki_repo/lp10_ms3_content_2016/
+            # This can be achieved by using the `--mirror-paths` option when
+            # running appleLoops.py and then copying the resulting folders
+            # to the munki repo.
+            if self.pkg_server and self.deployment_mode:
+                if not self.caching_server:
+                    # Test each package path if pkg_server is provided, fallback if not reachable  # NOQA
+                    req = requests.head(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server))  # NOQA
+                    if req.status_code == 200:
+                        _pkg_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
+
+            # Mandatory or optional
+            try:
+                _pkg_mandatory = packages[pkg]['IsMandatory']
+            except:
+                _pkg_mandatory = False
+
+            # Package size
+            try:
+                # Use requests.head to speed up getting the header for the file.  # NOQA
+                _pkg_size = requests.head(_pkg_url).headers.get('content-length')  # NOQA
+            except:
+                _pkg_size = None
+
+            # Some package ID's seem to have a '. ' in them which is a typo.
+            _pkg_id = packages[pkg]['PackageID'].replace('. ', '.')
+
+            # If this is a deployment run, return if the package is
+            # already installed on the machine, pkg version, and pkg ID
+            # Apple doesn't include any package version information in
+            # the feed, so can't compare if updates are required.
+            if self.deployment_mode:
+                _pkg_installed = self.loop_installed(_pkg_id)
+            elif not self.deployment_mode:
+                _pkg_installed = False
+
+            if self.destination:
+                # The base folder will be the app name and version, i.e. garageband1020  # NOQA
+                _base_folder = os.path.splitext(app_feed_dict['app_feed_file'])[0]  # NOQA
+                if _pkg_mandatory:
+                    _pkg_destination = os.path.join(self.destination, _base_folder, 'mandatory', _pkg_name)  # NOQA
+                else:
+                    _pkg_destination = os.path.join(self.destination, _base_folder, 'optional', _pkg_name)  # NOQA
+
+                # If the output is being mirrored
+                if self.mirror_paths:
+                    _pkg_destination = os.path.join(self.destination, 'lp10_ms3_content_%s' % _pkg_destination_folder_year, _pkg_name)  # NOQA
+
+            if self.deployment_mode:
+                # To avoid any folders that we can't delete being created, in deployment_mode, destination is the `/tmp` folder  # NOQA
+                _pkg_destination = os.path.join('/tmp', _pkg_name)
+
+            loop = self.Loop(
+                pkg_name=_pkg_name,
+                pkg_url=_pkg_url,
+                pkg_mandatory=_pkg_mandatory,
+                pkg_size=_pkg_size,
+                pkg_year=_pkg_year,
+                pkg_loop_for=_pkg_loop_for,
+                pkg_plist=_pkg_plist,
+                pkg_id=_pkg_id,
+                pkg_installed=_pkg_installed,
+                pkg_destination=_pkg_destination
+            )
+            self.log.debug(loop)
+
+            # Only care about mandatory or optional, because other arguments are taken care of elsewhere.  # NOQA
+            if any([self.mandatory_loops, self.optional_loops]):
+                # If mandatory argument supplied and loop is mandatory
+                if self.mandatory_loops and loop.pkg_mandatory:  # NOQA
+                    if not self.deployment_mode:
+                        self.download(loop)
+
+                # If optional argument supplied and loop is optional
+                if self.optional_loops and not loop.pkg_mandatory:  # NOQA
+                    if not self.deployment_mode:
+                        self.download(loop)
+
+                if self.deployment_mode and not loop.pkg_installed:
+                    # This function checks if the install needs to happen, and installs.  # NOQA
+                    self.install_pkg(loop)
+
+                # If optional argument supplied and loop is optional
+                # if self.optional_loops and not loop.pkg_mandatory:
+                #    self.download(loop)
+                #    if self.deployment_mode:
+                #        # This function checks if the install needs to happen, and installs.  # NOQA
+                #        self.install_pkg(loop)
+            else:
+                print 'Must specify either \'-m, --mandatory\' or \'-o, --optional\' to download loops.'  # NOQA
+                self.log.info('Must specify either \'-m, --mandatory\' or \'-o, --optional\' to download loops. Exiting.')  # NOQA
+                sys.exit(1)
+
+    def loop_installed(self, pkg_id):
+        cmd = ['/usr/sbin/pkgutil', '--pkg-info-plist', pkg_id]
+        (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
+
+        if result:
+            try:
+                if readPlistFromString(result.strip()):
+                    # Only care if we can read the plist
+                    result = True
+            except:
+                # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
+                result = False
+
+        if error:
+            # If there is an error, then the package is probably not installed.
+            # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
+            result = False
+
+        return result
+
+    def download(self, pkg):
+        # The mighty power of curl. Using `-L -C - <url>` to resume the download if a file exists.  # NOQA
+        if self.quiet_mode:
+            cmd = ['/usr/bin/curl', '--silent', '-L', '-C', '-', pkg.pkg_url, '--create-dirs', '-o', pkg.pkg_destination, '--user-agent', self.user_agent]  # NOQA
+        else:
+            cmd = ['/usr/bin/curl', '--progress-bar', '-L', '-C', '-', pkg.pkg_url, '--create-dirs', '-o', pkg.pkg_destination, '--user-agent', self.user_agent]  # NOQA
+
+        if not os.path.exists(pkg.pkg_destination):
+                # Test if there is a duplicate. This also copies duplicates.
+            try:
+                self.duplicate_file_exists(pkg)
+            except:  # Exception as e:
+                # Use the exception to kick the download process.
+                if self.dry_run:
+                    if not self.quiet_mode:
+                        if not self.deployment_mode or not pkg.pkg_installed:
+                            print 'Download: %s (%s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)))  # NOQA
+                            self.log.info('Download: %s (%s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size))))  # NOQA
+
+                    # Add this to self.files_found so we can test on the next go around  # NOQA
+                    if self.files_found:
+                        if pkg.pkg_destination not in self.files_found:
+                            self.files_found.append(pkg.pkg_destination)
+                else:
+                    if not self.quiet_mode:
+                        # Do some quick tests if pkg_server is specified
+                        print 'Downloading: %s (%s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)))  # NOQA
+                        self.log.info('Downloading: %s (%s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size))))  # NOQA
+                        subprocess.check_call(cmd)
+                        # Add this to self.files_found so we can test on the next go around  # NOQA
+                        if self.files_found:
+                            if pkg.pkg_destination not in self.files_found:
+                                self.files_found.append(pkg.pkg_destination)
+
+        elif os.path.exists(pkg.pkg_destination):
+            if not self.quiet_mode:
+                print 'Skipping: %s' % pkg.pkg_name
+                self.log.info('Skipping %s' % pkg.pkg_name)
+
+    def convert_size(self, file_size, precision=2):
+        '''Converts the package file size into a human readable number.'''
+        try:
+            suffixes = ['B', 'KB', 'MB', 'GB', 'TB']
+            suffix_index = 0
+            while file_size > 1024 and suffix_index < 4:
+                suffix_index += 1
+                file_size = file_size/1024.0
+
+            return '%.*f %s' % (precision, file_size, suffixes[suffix_index])  # NOQA
+        except Exception as e:
+            raise e
+
+    def duplicate_file_exists(self, pkg):
+        '''Simple test to see if a duplicate file exists elsewhere.
+        This uses exceptions to indicate an item needs to be downloaded.'''
+        if len(self.files_found) > 0:
+            for source_file in self.files_found:
+                if pkg.pkg_name in os.path.basename(source_file):  # NOQA
+                    if self.dry_run:
+                        print 'Copy existing file: %s' % pkg.pkg_name
+                        self.log.info('Copy existing file: %s' % pkg.pkg_name)
+
+                    # If not a dry run, do the thing
+                    if not self.dry_run:
+                        if not os.path.exists(pkg.pkg_destination):
+                            # Make destination folder if it doesn't exist
+                            try:
+                                if not os.path.exists(os.path.dirname(pkg.pkg_destination)):  # NOQA
+                                    os.makedirs(os.path.dirname(pkg.pkg_destination))  # NOQA
+                                    self.log.debug('Created %s to store packages.' % os.path.dirname(pkg.pkg_destination))  # NOQA
+                            except:
+                                self.log.debug('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
+                                raise Exception('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
+
+                            # Try to copy the file
+                            try:
+                                shutil.copy2(source_file, pkg.pkg_destination)
+                                if not self.quiet_mode:
+                                    print 'Copied existing file: %s' % pkg.pkg_name  # NOQA
+                                    self.log.info('Copied existing file: %s' % pkg.pkg_name)  # NOQA
+                            except:
+                                self.log.info('Could not copy file: %s' % pkg.pkg_name)  # NOQA
+                                raise Exception('Could not copy file: %s' % pkg.pkg_name)  # NOQA
+                else:
+                    # Raise exception if the file doesn't match any files discovered in self.found_files  # NOQA
+                    self.log.debug('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
+                    raise Exception('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
+        else:
+            self.log.debug('self.files_found list is probably empty because this directory either has no identifiable loops, or the directory does not exist.')  # NOQA
+            raise Exception('Files Found list does not exist')
+
+    def install_pkg(self, pkg, target=None, allow_untrusted=False):
+        '''Installs the package onto the system when used in deployment mode.
+        Attempts to install then delete the downloaded package.'''
+        # Only install if the package isn't already installed.
+        if not pkg.pkg_installed:
+            if not target:
+                target = '/'
+
+            cmd = ['/usr/sbin/installer', '-pkg', pkg.pkg_destination, '-target', target]  # NOQA
+            # Allow untrusted is useful if the Apple cert has expired, but is not necessarily best practice.  # NOQA
+            # In this instance, if one must allow untrusted pkgs to be signed, then you'll need to change the install_pkg() in process_pkgs() function.  # NOQA
+            if allow_untrusted:
+                cmd = ['/usr/sbin/installer', '-allowUntrusted', '-pkg', pkg.pkg_destination, '-target', target]  # NOQA
+                self.log.debug('Allowing untrusted package to be installed: %s' % pkg.pkg_name)  # NOQA
 
             if self.dry_run:
-                print '%s packages to process, %s (%s) to download' % (
-                    len(self.master_list), download_counter,
-                    self.convert_size(download_amount)
-                )
+                print 'Download and install: %s' % pkg.pkg_name
+
+            if not self.dry_run:
+                print 'Installing: %s' % pkg.pkg_name
+                (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
+                if 'successful' in result:
+                    print 'Installed: %s' % pkg.pkg_name
+                    try:
+                        os.remove(pkg.pkg_destination)
+                    except Exception as e:
+                        self.log.debug('Error removing package: %s' % e)
+                        raise e
+
+                if error or any(x in result.lower() for x in ['fail', 'failed']):  # NOQA
+                    print 'Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name  # NOQA
+                    self.log.info('Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name)  # NOQA
+                    try:
+                        os.remove(pkg.pkg_destination)
+                    except Exception as e:
+                        self.log.debug('Error removing package: %s' % e)
+                        raise e
+
+    def build_dmg(self, dmg_filename):
+        '''Builds a DMG. Default filename is appleLoops_YYYY-MM-DD.dmg.'''  # NOQA
+        cmd = ['/usr/bin/hdiutil', 'create', '-volname', 'appleLoops', '-srcfolder', self.destination, dmg_filename]  # NOQA
+        if self.dry_run:
+            if not self.quite_mode:
+                print 'Build %s from %s' % (dmg_filename, self.destination)
+        else:
+            if not os.path.exists(dmg_filename):
+                if not self.quiet_mode:
+                    print 'Building %s' % dmg_filename
+
+                subprocess.check_call(cmd)
             else:
-                if len(self.download_amount) >= 1:
-                    print 'Downloaded %s packages (%s) ' % (
-                        download_counter, self.convert_size(download_amount)
-                    )
-
-            if self.dmg_path:
-                self.build_dmg(dmg_path=self.dmg_path)
-
-        except (KeyboardInterrupt, SystemExit):
-            print ''
-            sys.exit(0)
+                print '%s already exists.' % dmg_filename
+                sys.exit(1)
 
 
+# Main!
 def main():
-    # Handle keyboard signal interrupt
-    def signal_handler(signal, frame):
-        print 'Exiting'
-        sys.exit()
-
-    signal.signal(signal.SIGINT, signal_handler)
-
     class SaneUsageFormat(argparse.HelpFormatter):
         """
         Makes the help output somewhat more sane.
@@ -804,31 +773,39 @@ def main():
             return action.dest.upper()
 
     parser = argparse.ArgumentParser(formatter_class=SaneUsageFormat)
-    exclusive_group = parser.add_mutually_exclusive_group()
+    modes_exclusive_group = parser.add_mutually_exclusive_group()
+    server_exclusive_group = parser.add_mutually_exclusive_group()
 
-    # Option to build DMG
-    parser.add_argument(
-        '--build-dmg',
+    modes_exclusive_group.add_argument(
+        '--apps',
         type=str,
-        nargs=1,
-        dest='build_dmg',
-        metavar='/path/to/file.dmg',
-        help='Builds a DMG of the downloaded loops.',
+        nargs='+',
+        dest='apps',
+        metavar='<app>',
+        help='Processes all loops for all releases of specified apps.',
         required=False
     )
 
-    # Option for cache server URL
     parser.add_argument(
+        '-b', '--build-dmg',
+        type=str,
+        nargs=1,
+        dest='dmg_filename',
+        metavar='dmg_filename.dmg',
+        help='Builds a DMG of the downloaded content.',
+        required=False
+    )
+
+    server_exclusive_group.add_argument(
         '-c', '--cache-server',
         type=str,
         nargs=1,
         dest='cache_server',
-        metavar='http://url:port',
+        metavar='http://example.org:port',
         help='Use cache server to download content through',
         required=False
     )
 
-    # Option for output directory
     parser.add_argument(
         '-d', '--destination',
         type=str,
@@ -839,30 +816,15 @@ def main():
         required=False
     )
 
-    # Option for parsing a particular file
-    parser.add_argument(
-        '-f', '--file',
-        type=str,
-        nargs='+',
-        dest='plist_file',
-        choices=(AppleLoops().file_choices),
-        # choices=['foo'],
-        # metavar='<file>',
-        help='Specify one or more files to process loops from',
-        required=False
-    )
-
-    # Option for JSS special mode
-    parser.add_argument(
-        '-j', '--jss',
+    modes_exclusive_group.add_argument(
+        '--deployment',
         action='store_true',
-        dest='jss_quiet_output',
-        help='Minimal output to reduce spamming the JSS console',
+        dest='deployment',
+        help='Runs in deployment mode (download and install loops).',  # NOQA
         required=False
     )
 
-    # Option for mandatory content only
-    exclusive_group.add_argument(
+    parser.add_argument(
         '-m', '--mandatory-only',
         action='store_true',
         dest='mandatory',
@@ -870,7 +832,14 @@ def main():
         required=False
     )
 
-    # Option for dry run
+    parser.add_argument(
+        '--mirror-paths',
+        action='store_true',
+        dest='mirror',
+        help='Mirror the Apple server paths in the destination.',
+        required=False
+    )
+
     parser.add_argument(
         '-n', '--dry-run',
         action='store_true',
@@ -879,8 +848,7 @@ def main():
         required=False
     )
 
-    # Option for optional content only
-    exclusive_group.add_argument(
+    parser.add_argument(
         '-o', '--optional-only',
         action='store_true',
         dest='optional',
@@ -888,98 +856,111 @@ def main():
         required=False
     )
 
-    # Option for package set (either 'garageband' or 'logicpro')
-    parser.add_argument(
-        '-p', '--package-set',
+    server_exclusive_group.add_argument(
+        '--pkg-server',
         type=str,
-        nargs='+',
-        dest='package_set',
-        choices=['garageband', 'logicpro', 'mainstage'],
-        help='Specify one or more package set to download',
+        nargs=1,
+        dest='pkg_server',
+        metavar='http://example.org/path_to/loops',
+        help='Specify http server where loops are stored in your local environment.',  # NOQA
         required=False
     )
 
-    # Option for content year
-    parser.add_argument(
-        '-y', '--content-year',
+    modes_exclusive_group.add_argument(
+        '--plists',
         type=str,
         nargs='+',
-        dest='content_year',
-        choices=AppleLoops().loop_years,
-        help='Specify one or more content year to download',
+        dest='plists',
+        metavar=AppleLoops(help_init=False).supported_plists,
+        help='Processes all loops in specified plists.',
+        required=False
+    )
+
+    parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        dest='quiet',
+        help='No output.',
         required=False
     )
 
     args = parser.parse_args()
 
-    # Set which package set to download
-    if args.package_set:
-        pkg_set = args.package_set
-    else:
-        if args.plist_file:
-            pkg_set = ['garageband', 'logicpro', 'mainstage']
+    if len(sys.argv) > 1:
+        if args.apps:
+            _apps = args.apps
         else:
-            pkg_set = ['garageband']
+            _apps = None
 
-    # Set output directory
-    if args.destination and len(args.destination) is 1:
-        store_in = args.destination[0]
-    else:
-        store_in = None
-
-    # Set content year
-    if not args.content_year:
-        year = ['2016']
-    else:
-        year = args.content_year
-
-    # Set output directory
-    if args.cache_server and len(args.cache_server) is 1:
-        cache_server = args.cache_server[0]
-    else:
-        cache_server = None
-
-    # File process
-    if args.plist_file:
-        files_to_process = args.plist_file
-        # Sort these files so we can take advantage of duplicate files
-        files_to_process.sort()
-    else:
-        files_to_process = None
-
-    # Suppressed mode for JSS output
-    if args.jss_quiet_output:
-        jss_output_mode = True
-    else:
-        jss_output_mode = False
-
-    # DMG Path
-    if args.build_dmg and len(args.build_dmg) is 1:
-        if args.build_dmg[0].endswith('.dmg'):
-            build_dmg = args.build_dmg[0]
+        if args.dmg_filename:
+            _dmg_filename = args.dmg_filename[0]
         else:
-            print ('%s must end with .dmg' % args.build_dmg[0])
-            sys.exit(1)
+            _dmg_filename = None
+
+        if args.cache_server:  # NOQA
+            _cache_server = args.cache_server[0]
+        else:
+            _cache_server = None
+
+        if args.destination:
+            _destination = args.destination[0]
+        else:
+            _destination = '/tmp'
+
+        if args.deployment:
+            _deployment = True
+        else:
+            _deployment = False
+
+        if args.mandatory:
+            _mandatory = True
+        else:
+            _mandatory = False
+
+        if args.mirror:
+            _mirror = True
+        else:
+            _mirror = False
+
+        if args.dry_run:
+            _dry_run = True
+        else:
+            _dry_run = False
+
+        if args.optional:
+            _optional = True
+        else:
+            _optional = False
+
+        if args.pkg_server:  # NOQA
+            _pkg_server = args.pkg_server[0]
+        else:
+            _pkg_server = False
+
+        if args.plists:
+            if all(x.endswith('.plist') for x in args.plists):
+                _plists = args.plists
+            else:
+                print 'Specified argument option must end with .plist'
+                sys.exit(1)
+        else:
+            _plists = None
+
+        if args.quiet:
+            _quiet = True
+        else:
+            _quiet = False
+
+        al = AppleLoops(apps=_apps, apps_plist=_plists, caching_server=_cache_server, destination=_destination,  # NOQA
+                        deployment_mode=_deployment, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
+                        mandatory_loops=_mandatory, mirror_paths=_mirror, optional_loops=_optional,  # NOQA
+                        pkg_server=_pkg_server, quiet_mode=_quiet, help_init=False)  # NOQA
+        al.main_processor()
     else:
-        build_dmg = None
+        al = AppleLoops(help_init=True)
+        parser.print_help()
+        sys.exit(0)
 
-    # Instantiate the class AppleLoops with options
-    loops = AppleLoops(download_location=store_in,
-                       dry_run=args.dry_run,
-                       package_set=pkg_set,
-                       package_year=year,
-                       mandatory_pkg=args.mandatory,
-                       optional_pkg=args.optional,
-                       caching_server=cache_server,
-                       files_process=files_to_process,
-                       jss_mode=jss_output_mode,
-                       dmg_path=build_dmg,
-                       munki_import=False)
-
-    loops.main_processor()
 
 if __name__ == '__main__':
-    try:
-        main()
-    except (KeyboardInterrupt, SystemExit):
-        sys.exit()
+    main()
