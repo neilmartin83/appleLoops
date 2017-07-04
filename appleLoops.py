@@ -30,6 +30,7 @@ Requirements:
 import argparse
 import logging
 import os
+import plistlib
 import sys
 import shutil
 import subprocess
@@ -42,6 +43,7 @@ except:
 from collections import namedtuple
 from glob import glob
 from logging.handlers import RotatingFileHandler
+from time import strftime
 from urlparse import urlparse
 
 # Imports specifically for FoundationPlist
@@ -177,14 +179,23 @@ class AppleLoops():
             self.deployment_mode = False
 
         # Read in configuration
-        self.configuration_file = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
+        # self.configuration_file = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
+        self.configuration_file = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/com.github.carlashley.appleLoops.configuration.plist'  # NOQA
         try:
-            # Full configuration dictionary
-            self.configuration = readPlist(self.configuration_file)
-        except:
-            raise
-            self.log.debug('Unable to read configuration file. Exiting.')
-            print 'Unable to read configuration file.'
+            req = requests.head(self.configuration_file)
+            if req.status_code == 200:
+                # Full configuration dictionary
+                configuration = requests.get(self.configuration_file).text  # NOQA
+                # For some reason, munki readPlistFromString doesn't play well with getting this plist, so reverting to plistlib.  # NOQA
+                self.configuration = plistlib.readPlistFromString(configuration)  # NOQA
+            else:
+                print req.status_code
+                self.log.debug('Unable to read configuration file. Exiting.')
+                print 'Unable to read configuration file.'
+                sys.exit(1)
+        except Exception as e:
+            self.log.debug('Unable to read configuration file %s Exiting.' % e)
+            print 'Unable to read configuration file. %s' % e
             sys.exit(1)
 
         # Supported apps
@@ -307,11 +318,21 @@ class AppleLoops():
         # Some feedback to stdout for CLI use
         if not self.quiet_mode:
             if self.mirror_paths:
-                print 'Loops downloading to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
-                self.log.info('Loops downloading to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+                if not self.dry_run:
+                    print 'Starting run at %s' % strftime("%Y-%m-%d %H:%M:%S")
+                    print 'Loops downloading to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
+                    self.log.info('Loops downloading to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+                else:
+                    print 'Dry run - oops download to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
+                    self.log.info('Dry run - loops download to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+
             else:
-                print 'Loops downloading to: %s' % self.destination
-                self.log.info('Loops downloading to: %s' % self.destination)
+                if not self.dry_run:
+                    print 'Loops downloading to: %s' % self.destination
+                    self.log.info('Loops downloading to: %s' % self.destination)  # NOQA
+                else:
+                    print 'Dry run - loops download to: %s' % self.destination
+                    self.log.info('Dry run - loops download to: %s' % self.destination)  # NOQA
 
             if self.caching_server:
                 print 'Caching Server: %s' % self.caching_server
@@ -391,6 +412,9 @@ class AppleLoops():
 
         if self.dmg_filename:
             self.build_dmg(self.dmg_filename)
+
+        if not self.quiet_mode and not self.dry_run:
+            print 'Finished run at %s' % strftime("%Y-%m-%d %H:%M:%S")
 
     # Functions
     def plist_url(self, app):
