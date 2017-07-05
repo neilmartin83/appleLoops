@@ -60,7 +60,7 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.1'
+__version__ = '2.0.2'
 __date__ = '2017-07-05'
 
 __license__ = 'Apache License, Version 2.0'
@@ -737,6 +737,11 @@ class AppleLoops():
                         raise e
                 else:
                     self.log.debug('Install does not appear to be successful: %s' % result)  # NOQA
+                    try:
+                        self.log.debug('Attempting to remove %s after install was not successful.' % pkg.pkg_name)  # NOQA
+                        os.remove(pkg.pkg_destination)
+                    except Exception as e:
+                        self.log.debug('Error removing package after install failure: %s' % e)  # NOQA
 
                 if error or any(x in result.lower() for x in ['fail', 'failed']):  # NOQA
                     print 'Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name  # NOQA
