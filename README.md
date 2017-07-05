@@ -29,15 +29,15 @@ The deployment behaviour implemented is to only to download and install if the l
 1. Whether deploying using munki or Casper Pro/JSS, Make sure `requests` module is installed on the machine that the loops need to be installed on. This can be done using `easy_install requests` (may need to be `root` to do this).
 2. The app that loops are being installed for _must_ be installed before using `appleLoops.py` to deploy the loop packages.
 3. `appleLoops.py` must be on the computer somewhere, i.e. `/usr/local/bin`. Must make the script executable and readable by `root`.
-4. _For current testing purposes, do a dry run before actual run: `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o`.
-5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o`.
+4. _For current testing purposes, do a dry run before actual run:_ `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o`.
+5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o`. This needs to be run as `root`, you will be prompted to use `sudo` if necessary.
 
 ### Advanced deployment process
 1. Download loops for _all_ apps you deploy, for example: ```./appleLoops.py --apps garageband mainstage --mirror-paths --destination /Volumes/Data/apple_audio_content --mandatory-only --optional-only```
 2. Get the folders `lp10_ms3_content_YYYY` (where `YYYY` represents a year) onto a web server your managed Macs have access to.
 3. Steps 1-3 as per _Simple deployment process_.
 4. _For current testing purposes, do a dry run before actual run: `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o --pkg-server http://example.org/apple_loops`.
-5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o --pkg-server http://example.org/apple_loops`.
+5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o --pkg-server http://example.org/apple_loops`. This needs to be run as `root`, you will be prompted to use `sudo` if necessary.
 
 **Important note:**
 

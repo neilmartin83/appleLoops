@@ -60,8 +60,8 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.0'
-__date__ = '2017-06-28'
+__version__ = '2.0.1'
+__date__ = '2017-07-05'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
@@ -569,17 +569,19 @@ class AppleLoops():
             if any([self.mandatory_loops, self.optional_loops]):
                 # If mandatory argument supplied and loop is mandatory
                 if self.mandatory_loops and loop.pkg_mandatory:  # NOQA
-                    if not self.deployment_mode:
+                    if self.deployment_mode and not loop.pkg_installed:
+                        self.download(loop)
+                        self.install_pkg(loop)
+                    else:
                         self.download(loop)
 
                 # If optional argument supplied and loop is optional
                 if self.optional_loops and not loop.pkg_mandatory:  # NOQA
-                    if not self.deployment_mode:
+                    if self.deployment_mode and not loop.pkg_installed:
                         self.download(loop)
-
-                if self.deployment_mode and not loop.pkg_installed:
-                    # This function checks if the install needs to happen, and installs.  # NOQA
-                    self.install_pkg(loop)
+                        self.install_pkg(loop)
+                    else:
+                        self.download(loop)
 
                 # If optional argument supplied and loop is optional
                 # if self.optional_loops and not loop.pkg_mandatory:
@@ -708,6 +710,7 @@ class AppleLoops():
         Attempts to install then delete the downloaded package.'''
         # Only install if the package isn't already installed.
         if not pkg.pkg_installed:
+            self.log.debug('Loop %s not installed' % pkg.pkg_name)
             if not target:
                 target = '/'
 
@@ -722,6 +725,7 @@ class AppleLoops():
                 print 'Download and install: %s' % pkg.pkg_name
 
             if not self.dry_run:
+                self.log.debug('Not in dry run, so attempting to install %s' % pkg.pkg_name)  # NOQA
                 print 'Installing: %s' % pkg.pkg_name
                 (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
                 if 'successful' in result:
@@ -731,10 +735,13 @@ class AppleLoops():
                     except Exception as e:
                         self.log.debug('Error removing package: %s' % e)
                         raise e
+                else:
+                    self.log.debug('Install does not appear to be successful: %s' % result)  # NOQA
 
                 if error or any(x in result.lower() for x in ['fail', 'failed']):  # NOQA
                     print 'Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name  # NOQA
                     self.log.info('Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name)  # NOQA
+                    self.log.debug('Install error: %s' % error)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
