@@ -60,8 +60,8 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.2'
-__date__ = '2017-07-05'
+__version__ = '2.0.3'
+__date__ = '2017-07-06'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
@@ -573,7 +573,9 @@ class AppleLoops():
                         self.download(loop)
                         self.install_pkg(loop)
                     else:
-                        self.download(loop)
+                        # Only download if this isn't a deployment run
+                        if not self.deployment_mode:
+                            self.download(loop)
 
                 # If optional argument supplied and loop is optional
                 if self.optional_loops and not loop.pkg_mandatory:  # NOQA
@@ -581,7 +583,9 @@ class AppleLoops():
                         self.download(loop)
                         self.install_pkg(loop)
                     else:
-                        self.download(loop)
+                        # Only download if this isn't a deployment run
+                        if not self.deployment_mode:
+                            self.download(loop)
 
                 # If optional argument supplied and loop is optional
                 # if self.optional_loops and not loop.pkg_mandatory:
