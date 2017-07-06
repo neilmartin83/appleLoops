@@ -6,7 +6,7 @@ This is a testing branch, only use for testing purposes. Use in production at yo
 **NOTE** A number of old command line arguments are no longer implemented, please run `./appleLoops.py --help` for all usage options.
 
 ## Requirements
-- `requests` module, installable with `sudo easy_install requests`
+- `requests` module, installable with `sudo easy_install requests` - clients must also be able to access `https://pypi.python.org/`
 - python shipped with macOS (typically `python 2.7.10`)
 - Active connection that can access `https://raw.githubusercontent.com` and `http://audiocontentdownload.apple.com`
 
