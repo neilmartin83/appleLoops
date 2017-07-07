@@ -25,6 +25,9 @@ Every so often, Apple likes to change the loops that a particular audio app requ
 
 The deployment behaviour implemented is to only to download and install if the loop is not present.
 
+## Clone the test branch
+Use `git clone https://github.com/carlashley/appleLoops --single-branch --branch test` to clone _just_ the `test` branch before continuing.
+
 ### Simple deployment process
 1. Whether deploying using munki or Casper Pro/JSS, Make sure `requests` module is installed on the machine that the loops need to be installed on. This can be done using `easy_install requests` (may need to be `root` to do this).
 2. The app that loops are being installed for _must_ be installed before using `appleLoops.py` to deploy the loop packages.
