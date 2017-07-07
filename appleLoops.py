@@ -41,6 +41,7 @@ except:
     sys.exit(1)
 
 from collections import namedtuple
+from distutils.version import LooseVersion, StrictVersion
 from glob import glob
 from logging.handlers import RotatingFileHandler
 from time import strftime
@@ -60,8 +61,8 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.3'
-__date__ = '2017-07-06'
+__version__ = '2.0.4'
+__date__ = '2017-07-07'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
@@ -312,7 +313,9 @@ class AppleLoops():
                                             'pkg_plist',
                                             'pkg_id',
                                             'pkg_installed',
-                                            'pkg_destination'])
+                                            'pkg_destination',
+                                            'pkg_local_ver',
+                                            'pkg_remote_ver'])
 
     def main_processor(self):
         # Some feedback to stdout for CLI use
@@ -535,6 +538,32 @@ class AppleLoops():
             elif not self.deployment_mode:
                 _pkg_installed = False
 
+            # If pkg installed, get version
+            try:
+                _pkg_local_ver = self.local_version(_pkg_id)
+            except:
+                _pkg_local_ver = 0
+
+            # If the feed has a PackageVersion, get it.
+            try:
+                # Apple uses long type, but need to make it a number then a string to compare with Loose/StrictVersion()  # NOQA
+                _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))
+            except:
+                _pkg_remote_ver = 0
+
+            # Do a version check to handle any pkgs that are upgrades
+            try:
+                if LooseVersion(_pkg_local_ver) < LooseVersion(_pkg_remote_ver):  # NOQA
+                    self.log.info('%s needs upgrading (based on LooseVersion())' % _pkg_name)  # NOQA
+                    _pkg_installed = False
+            except:
+                try:
+                    if StrictVersion(_pkg_local_ver) < StrictVersion(_pkg_remote_ver):  # NOQA
+                        self.log.info('%s needs upgrading (based on StrictVersion())' % _pkg_name)  # NOQA
+                        _pkg_installed = False
+                except:
+                    pass
+
             if self.destination:
                 # The base folder will be the app name and version, i.e. garageband1020  # NOQA
                 _base_folder = os.path.splitext(app_feed_dict['app_feed_file'])[0]  # NOQA
@@ -561,7 +590,9 @@ class AppleLoops():
                 pkg_plist=_pkg_plist,
                 pkg_id=_pkg_id,
                 pkg_installed=_pkg_installed,
-                pkg_destination=_pkg_destination
+                pkg_destination=_pkg_destination,
+                pkg_local_ver=_pkg_local_ver,
+                pkg_remote_ver=_pkg_remote_ver,
             )
             self.log.debug(loop)
 
@@ -615,6 +646,25 @@ class AppleLoops():
             # If there is an error, then the package is probably not installed.
             # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
             result = False
+
+        return result
+
+    def local_version(self, pkg_id):
+        cmd = ['/usr/sbin/pkgutil', '--pkg-info-plist', pkg_id]
+        (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
+
+        if result:
+            try:
+                result = readPlistFromString(result.strip())
+                result = result['pkg-version']
+            except:
+                # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
+                result = 0
+
+        if error:
+            # If there is an error, then the package is probably not installed.
+            # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
+            result = 0
 
         return result
 
@@ -726,7 +776,7 @@ class AppleLoops():
                 self.log.debug('Allowing untrusted package to be installed: %s' % pkg.pkg_name)  # NOQA
 
             if self.dry_run:
-                print 'Download and install: %s' % pkg.pkg_name
+                print 'Install: %s' % pkg.pkg_name
 
             if not self.dry_run:
                 self.log.debug('Not in dry run, so attempting to install %s' % pkg.pkg_name)  # NOQA
