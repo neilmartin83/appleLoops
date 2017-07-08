@@ -61,8 +61,8 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.4'
-__date__ = '2017-07-07'
+__version__ = '2.0.5'
+__date__ = '2017-07-08'
 
 __license__ = 'Apache License, Version 2.0'
 __maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
@@ -153,7 +153,7 @@ class AppleLoops():
                  destination='/tmp', deployment_mode=False,
                  dmg_filename=None, dry_run=True, mandatory_loops=False,
                  mirror_paths=False, optional_loops=False, pkg_server=False,
-                 quiet_mode=False, help_init=False):
+                 quiet_mode=False, help_init=False, hard_link=False):
         # Logging
         self.log_file = '/tmp/appleLoops.log'
         self.log = logging.getLogger('appleLoops')
@@ -274,6 +274,9 @@ class AppleLoops():
             self.quiet_mode = quiet_mode
 
             self.user_agent = '%s/%s' % (self.configuration['user_agent'], __version__)  # NOQA
+
+            # Determines if file copy or hard link (to reduce disk usage)
+            self.hard_link = hard_link
 
             if pkg_server:
                 # Don't need a trailing / in this address
@@ -594,7 +597,6 @@ class AppleLoops():
                 pkg_local_ver=_pkg_local_ver,
                 pkg_remote_ver=_pkg_remote_ver,
             )
-            self.log.debug(loop)
 
             # Only care about mandatory or optional, because other arguments are taken care of elsewhere.  # NOQA
             if any([self.mandatory_loops, self.optional_loops]):
@@ -727,8 +729,12 @@ class AppleLoops():
             for source_file in self.files_found:
                 if pkg.pkg_name in os.path.basename(source_file):  # NOQA
                     if self.dry_run:
-                        print 'Copy existing file: %s' % pkg.pkg_name
-                        self.log.info('Copy existing file: %s' % pkg.pkg_name)
+                        if self.hard_link:
+                            print 'Hard link existing file: %s' % pkg.pkg_name  # NOQA
+                            self.log.info('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
+                        else:
+                            print 'Copy existing file: %s' % pkg.pkg_name
+                            self.log.info('Copy existing file: %s' % pkg.pkg_name)  # NOQA
 
                     # If not a dry run, do the thing
                     if not self.dry_run:
@@ -742,16 +748,28 @@ class AppleLoops():
                                 self.log.debug('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
                                 raise Exception('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
 
-                            # Try to copy the file
-                            try:
-                                shutil.copy2(source_file, pkg.pkg_destination)
-                                if not self.quiet_mode:
-                                    print 'Copied existing file: %s' % pkg.pkg_name  # NOQA
-                                    self.log.info('Copied existing file: %s' % pkg.pkg_name)  # NOQA
-                            except:
-                                self.log.info('Could not copy file: %s' % pkg.pkg_name)  # NOQA
-                                raise Exception('Could not copy file: %s' % pkg.pkg_name)  # NOQA
-                else:
+                            # Try to hard link or copy the file
+                            if self.hard_link:
+                                try:
+                                    # Create a hard link to save space
+                                    os.link(source_file, pkg.pkg_destination)
+                                    if not self.quiet_mode:
+                                        print 'Hard linked existing file: %s' % pkg.pkg_name  # NOQA
+                                        self.log.info('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
+                                except Exception as e:
+                                    self.log.info('Hard link operation failed: %s' % e)  # NOQA
+                                    raise Exception('Hard link operation failed: %s' % e)  # NOQA
+                            else:
+                                try:
+                                    shutil.copy2(source_file, pkg.pkg_destination)  # NOQA
+                                    if not self.quiet_mode:
+                                        print 'Copied existing file: %s' % pkg.pkg_name  # NOQA
+                                        self.log.info('Copied existing file: %s' % pkg.pkg_name)  # NOQA
+                                except Exception as e:
+                                    self.log.info('Copy operation failed: %s' % e)  # NOQA
+                                    raise Exception('Copy operation failed: %s' % e)  # NOQA
+                # Be explicit about not matching any item in self.files_found here, otherwise excessive downloads  # NOQA
+                elif not any(x.endswith(pkg.pkg_name) for x in self.files_found):  # NOQA
                     # Raise exception if the file doesn't match any files discovered in self.found_files  # NOQA
                     self.log.debug('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
                     raise Exception('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
@@ -915,6 +933,14 @@ def main():
     )
 
     parser.add_argument(
+        '--hard-link',
+        action='store_true',
+        dest='hard_link',
+        help='Create hard links instead of copying files. Use this to save disk space.',  # NOQA
+        required=False
+    )
+
+    parser.add_argument(
         '-m', '--mandatory-only',
         action='store_true',
         dest='mandatory',
@@ -1041,10 +1067,15 @@ def main():
         else:
             _quiet = False
 
+        if args.hard_link:
+            _hard_link = True
+        else:
+            _hard_link = False
+
         al = AppleLoops(apps=_apps, apps_plist=_plists, caching_server=_cache_server, destination=_destination,  # NOQA
                         deployment_mode=_deployment, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
                         mandatory_loops=_mandatory, mirror_paths=_mirror, optional_loops=_optional,  # NOQA
-                        pkg_server=_pkg_server, quiet_mode=_quiet, help_init=False)  # NOQA
+                        pkg_server=_pkg_server, quiet_mode=_quiet, hard_link=_hard_link, help_init=False)  # NOQA
         al.main_processor()
     else:
         al = AppleLoops(help_init=True)
