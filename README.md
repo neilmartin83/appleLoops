@@ -23,7 +23,7 @@ This is a testing branch, only use for testing purposes. Use in production at yo
 ## Installing loops
 Every so often, Apple likes to change the loops that a particular audio app requires to run. Keeping up with this using munki or Casper Pro/JSS can be a pain in the neck. To make this easier, `appleLoops.py` now has the ability to install loops using `--deployment` mode.
 
-When `appleLoops.py` is run with the `--deployment` argument, it will check the `/Applications` folder to determine if GarageBand, Logic Pro X, or Mainstage 3 are installed. If any of these apps are installed, it looks for the included `plist` file that contains a list of all loops required for that app, next it checks what loops are installed (if any) and what are not installed.
+When `appleLoops.py` is run with the `--deployment` argument, it will check the `/Applications` folder to determine if GarageBand, Logic Pro X, or MainStage 3 are installed. If any of these apps are installed, it looks for the included `plist` file that contains a list of all loops required for that app, next it checks what loops are installed (if any) and what are not installed.
 
 Based on the combination of `-m/--mandatory-only`/`-o/--optional-only` it will install or upgrade any necessary loops, skipping over loops that are already installed.
 When a loop has been downloaded, it is installed, then removed from the `/tmp` folder, repeated until the process is completed.
