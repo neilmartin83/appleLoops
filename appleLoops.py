@@ -61,7 +61,7 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 __author__ = 'Carl Windus'
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.5'
+__version__ = '2.0.6'
 __date__ = '2017-07-08'
 
 __license__ = 'Apache License, Version 2.0'
@@ -155,13 +155,14 @@ class AppleLoops():
                  mirror_paths=False, optional_loops=False, pkg_server=False,
                  quiet_mode=False, help_init=False, hard_link=False):
         # Logging
-        self.log_file = '/tmp/appleLoops.log'
         self.log = logging.getLogger('appleLoops')
-        self.log.setLevel(logging.DEBUG)
-        self.log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")  # NOQA
-        self.fh = RotatingFileHandler(self.log_file, maxBytes=(1048576*5), backupCount=7)  # NOQA Logs capped at ~5MB
-        self.fh.setFormatter(self.log_format)
-        self.log.addHandler(self.fh)
+        if not len(self.log.handlers):
+            self.log_file = '/tmp/appleLoops.log'
+            self.log.setLevel(logging.DEBUG)
+            self.fh = RotatingFileHandler(self.log_file, maxBytes=(1048576*5), backupCount=7)  # NOQA Logs capped at ~5MB
+            self.log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")  # NOQA
+            self.fh.setFormatter(self.log_format)
+            self.log.addHandler(self.fh)
 
         # Dry run, yo.
         self.dry_run = dry_run
@@ -829,7 +830,7 @@ class AppleLoops():
         '''Builds a DMG. Default filename is appleLoops_YYYY-MM-DD.dmg.'''  # NOQA
         cmd = ['/usr/bin/hdiutil', 'create', '-volname', 'appleLoops', '-srcfolder', self.destination, dmg_filename]  # NOQA
         if self.dry_run:
-            if not self.quite_mode:
+            if not self.quiet_mode:
                 print 'Build %s from %s' % (dmg_filename, self.destination)
         else:
             if not os.path.exists(dmg_filename):
