@@ -58,15 +58,19 @@ from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 # pylint: enable=E0611
 
 # Script information
+__script__ = 'appleLoops.py'
 __author__ = 'Carl Windus'
+__maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.7'
+__version__ = '2.0.8'
 __date__ = '2017-07-29'
 
 __license__ = 'Apache License, Version 2.0'
-__maintainer__ = 'Carl Windus: https://github.com/carlashley/appleLoops'
+__github__ = 'https://github.com/carlashley/appleLoops'
 __status__ = 'Testing'
+
+version_string = '%s version %s (%s). Author: %s (licensed under the %s). Status: %s. GitHub: %s' % (__script__, __version__, __date__, __copyright__, __license__, __status__, __github__)  # NOQA
 
 
 # FoundationPlist from munki
@@ -1079,9 +1083,21 @@ def main():
         required=False
     )
 
+    parser.add_argument(
+        '-v', '--version',
+        action='store_true',
+        dest='version',
+        help='Displays information.',
+        required=False
+    )
+
     args = parser.parse_args()
 
     if len(sys.argv) > 1:
+        if args.version:
+            print version_string
+            sys.exit(0)
+
         if args.apps:
             _apps = args.apps
         else:
