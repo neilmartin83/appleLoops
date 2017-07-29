@@ -46,6 +46,8 @@ Use `git clone https://github.com/carlashley/appleLoops --single-branch --branch
 4. _For current testing purposes, do a dry run before actual run: `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o --pkg-server http://example.org/apple_loops`.
 5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o --pkg-server http://example.org/apple_loops`. This needs to be run as `root`, you will be prompted to use `sudo` if necessary.
 
+More information about deployment can be found in the [Wiki](../wiki).
+
 **Important note:**
 
 `appleLoops.py` expects to be able to find folders named `lp10_ms3_content_YYYY` wherever you've supplied the `--pkg-server` option, if it can't find packages in this location, it will fallback to using the Apple servers.
