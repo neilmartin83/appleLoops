@@ -63,7 +63,7 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.0'
+__version__ = '2.1.1'
 __date__ = '2017-08-01'
 
 __license__ = 'Apache License, Version 2.0'
@@ -158,7 +158,7 @@ class AppleLoops():
                  dmg_filename=None, dry_run=True, mandatory_loops=False,
                  mirror_paths=False, optional_loops=False, pkg_server=False,
                  quiet_mode=False, help_init=False, hard_link=False,
-                 log_path=False, space_threshold=5):
+                 log_path=False, space_threshold=5, debug=False):
         if not help_init:
             # Logging
             if log_path:
@@ -170,7 +170,12 @@ class AppleLoops():
 
             if not len(self.log.handlers):
                 self.log_file = os.path.join(self.log_path, 'appleLoops.log')
-                self.log.setLevel(logging.DEBUG)
+                if debug:
+                    self.debug = debug
+                    self.log.setLevel(logging.DEBUG)
+                else:
+                    self.log.setLevel(logging.INFO)
+
                 self.fh = RotatingFileHandler(self.log_file, maxBytes=(1048576*5), backupCount=7)  # NOQA Logs capped at ~5MB
                 self.log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")  # NOQA
                 self.fh.setFormatter(self.log_format)
@@ -394,35 +399,37 @@ class AppleLoops():
                     try:
                         urls = self.plist_url(app)
                         self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
-                        if self.dry_run:
-                            print('-' * 15)  # NOQA
-                            if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
-                                print 'Nothing to do here, have some coffee! :)'  # NOQA
-                                sys.exit(0)
-                            else:
-                                print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
-                                if self.space_threshold:
-                                    print 'Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space'])  # NOQA
-                                    print 'Protected free space: %s' % self.convert_size(self.size_info['reserved_space'])  # NOQA
-                                    if self.size_info['install_total'] < self.size_info['new_available_space']:  # NOQA
-                                        print 'All loops will be installed, sufficient free space'  # NOQA
-                                        self.log.info('All loops will be installed, sufficient free space')  # NOQA
-                                    else:
-                                        print 'No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space'])  # NOQA
-                                        self.log.info('No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space']))  # NOQA
-
-                                if not self.space_threshold:
-                                    print 'Free space: %s' % self.convert_size(self.space_available())  # NOQA
-                                    if self.size_info['install_total'] < self.space_available():  # NOQA
-                                        print 'All loops will be installed, sufficient free space'  # NOQA
-                                        self.log.info('All loops will be installed, sufficient free space')  # NOQA
-                                    else:
-                                        print 'No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available())  # NOQA
-                                        self.log.info('No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available()))  # NOQA
-                    except:
+                    except Exception as e:
                         # If there is an exception, it's likely because the plist for the app doesn't exist. Skip.  # NOQA
-                        self.log.debug('Skipping %s as it does not appear to be installed.' % app)  # NOQA
+                        if self.debug:
+                            self.log.debug('Exception: %s' % e)
+                        self.log.info('Skipping %s as it does not appear to be installed.' % app)  # NOQA
                         pass
+                if self.dry_run:
+                    print('-' * 15)  # NOQA
+                    if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
+                        print 'Nothing to do here, have some coffee! :)'  # NOQA
+                        sys.exit(0)
+                    else:
+                        print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
+                        if self.space_threshold:
+                            print 'Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space'])  # NOQA
+                            print 'Protected free space: %s' % self.convert_size(self.size_info['reserved_space'])  # NOQA
+                            if self.size_info['install_total'] < self.size_info['new_available_space']:  # NOQA
+                                print 'All loops will be installed, sufficient free space'  # NOQA
+                                self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                            else:
+                                print 'No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space'])  # NOQA
+                                self.log.info('No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space']))  # NOQA
+
+                        if not self.space_threshold:
+                            print 'Free space: %s' % self.convert_size(self.space_available())  # NOQA
+                            if self.size_info['install_total'] < self.space_available():  # NOQA
+                                print 'All loops will be installed, sufficient free space'  # NOQA
+                                self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                            else:
+                                print 'No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available())  # NOQA
+                                self.log.info('No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available()))  # NOQA
             else:
                 print 'Can\'t use apps or app_plist with deployment_mode.'
                 self.log.info('Can\'t use apps or app_plist with deployment mode.')  # NOQA
@@ -1051,6 +1058,14 @@ def main():
         required=False
     )
 
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        dest='debug',
+        help='Switch logging to debug level.',
+        required=False
+    )
+
     modes_exclusive_group.add_argument(
         '--deployment',
         action='store_true',
@@ -1183,6 +1198,11 @@ def main():
         else:
             _destination = '/tmp'
 
+        if args.debug:
+            _debug = True
+        else:
+            _debug = False
+
         if args.deployment:
             _deployment = True
         else:
@@ -1246,7 +1266,7 @@ def main():
                         deployment_mode=_deployment, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
                         mandatory_loops=_mandatory, mirror_paths=_mirror, optional_loops=_optional,  # NOQA
                         pkg_server=_pkg_server, quiet_mode=_quiet, hard_link=_hard_link, help_init=False,  # NOQA
-                        log_path=_log_path, space_threshold=_space_threshold)  # NOQA
+                        log_path=_log_path, space_threshold=_space_threshold, debug=_debug)  # NOQA
         al.main_processor()
     else:
         al = AppleLoops(help_init=True)
