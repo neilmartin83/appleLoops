@@ -63,8 +63,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.0.9'
-__date__ = '2017-07-29'
+__version__ = '2.1.0'
+__date__ = '2017-08-01'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -396,26 +396,29 @@ class AppleLoops():
                         self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
                         if self.dry_run:
                             print('-' * 15)  # NOQA
-                            print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
-                            if self.space_threshold:
-                                print 'Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space'])  # NOQA
-                                print 'Protected free space: %s' % self.convert_size(self.size_info['reserved_space'])  # NOQA
-                                if self.size_info['install_total'] < self.size_info['new_available_space']:  # NOQA
-                                    print 'All loops will be installed, sufficient free space'  # NOQA
-                                    self.log.info('All loops will be installed, sufficient free space')  # NOQA
-                                else:
-                                    print 'No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space'])  # NOQA
-                                    self.log.info('No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space']))  # NOQA
+                            if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
+                                print 'Nothing to do here, have some coffee! :)'  # NOQA
+                                sys.exit(0)
+                            else:
+                                print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
+                                if self.space_threshold:
+                                    print 'Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space'])  # NOQA
+                                    print 'Protected free space: %s' % self.convert_size(self.size_info['reserved_space'])  # NOQA
+                                    if self.size_info['install_total'] < self.size_info['new_available_space']:  # NOQA
+                                        print 'All loops will be installed, sufficient free space'  # NOQA
+                                        self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                                    else:
+                                        print 'No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space'])  # NOQA
+                                        self.log.info('No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space']))  # NOQA
 
-                            if not self.space_threshold:
-                                print 'Free space: %s' % self.convert_size(self.space_available())  # NOQA
-                                if self.size_info['install_total'] < self.space_available():  # NOQA
-                                    print 'All loops will be installed, sufficient free space'  # NOQA
-                                    self.log.info('All loops will be installed, sufficient free space')  # NOQA
-                                else:
-                                    print 'No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available())  # NOQA
-                                    self.log.info('No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available()))  # NOQA
-
+                                if not self.space_threshold:
+                                    print 'Free space: %s' % self.convert_size(self.space_available())  # NOQA
+                                    if self.size_info['install_total'] < self.space_available():  # NOQA
+                                        print 'All loops will be installed, sufficient free space'  # NOQA
+                                        self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                                    else:
+                                        print 'No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available())  # NOQA
+                                        self.log.info('No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available()))  # NOQA
                     except:
                         # If there is an exception, it's likely because the plist for the app doesn't exist. Skip.  # NOQA
                         self.log.debug('Skipping %s as it does not appear to be installed.' % app)  # NOQA
@@ -603,21 +606,20 @@ class AppleLoops():
             # the feed, so can't compare if updates are required.
             if self.deployment_mode:
                 _pkg_installed = self.loop_installed(_pkg_id)
-            elif not self.deployment_mode:
-                _pkg_installed = False
 
             # If pkg installed, get version
             try:
                 _pkg_local_ver = self.local_version(_pkg_id)
+                _pkg_local_ver = str(_pkg_local_ver)
             except:
-                _pkg_local_ver = 0
+                _pkg_local_ver = '0.0'
 
             # If the feed has a PackageVersion, get it.
             try:
                 # Apple uses long type, but need to make it a number then a string to compare with Loose/StrictVersion()  # NOQA
-                _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))
+                _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))  # NOQA
             except:
-                _pkg_remote_ver = 0
+                _pkg_remote_ver = '0.0'
 
             # Do a version check to handle any pkgs that are upgrades
             # Need to try Loose/Strict as version could be either
@@ -633,6 +635,11 @@ class AppleLoops():
                 except:
                     # Presume pkg not installed if both version tests fail
                     _pkg_installed = False
+                    _pkg_local_ver = '0.0'
+                    _pkg_remote_ver = '0.0'
+
+            if not self.deployment_mode:
+                _pkg_installed = False
 
             if self.destination:
                 # The base folder will be the app name and version, i.e. garageband1020  # NOQA
@@ -670,9 +677,10 @@ class AppleLoops():
                 # Appending to a list allows the free disk space/threshold
                 # checks to work
                 loops.append(loop)
+                self.log.debug(loop)
 
         # Internal method to check if download/download+install takes place
-        def download_or_install(loop):
+        def download_or_install(loop_pkg):
             '''Internal function to download/install depending on arguments'''  # NOQA
             if self.space_threshold and not self.dry_run:
                 if self.size_info['install_total'] >= self.size_info['new_available_space']:  # NOQA
@@ -680,20 +688,21 @@ class AppleLoops():
                     self.log.info('Aborting, will exceed threshold space limit of %s if loops are installed.' % self.convert_size(self.size_info['new_available_space']))  # NOQA
                     sys.exit(1)
 
-            if self.deployment_mode and not loop.pkg_installed:
-                # Check available space is sufficient to download and install  # NOQA
-                if sum([loop.pkg_size, loop.pkg_install_size]) < self.space_available():  # NOQA
-                    self.download(loop)
-                    self.install_pkg(loop)
-                else:
-                    print 'Insufficient space to download and install %s' % loop.pkg_name  # NOQA
-                    self.log.info('Insufficient space to download and install %s' % loop.pkg_name)  # NOQA
-                    # Exit with error status
-                    sys.exit(1)
+            if self.deployment_mode:
+                if not loop_pkg.pkg_installed:
+                    # Check available space is sufficient to download and install  # NOQA
+                    if sum([loop_pkg.pkg_size, loop_pkg.pkg_install_size]) < self.space_available():  # NOQA
+                        self.download(loop_pkg)
+                        self.install_pkg(loop_pkg)
+                    else:
+                        print 'Insufficient space to download and install %s' % loop_pkg.pkg_name  # NOQA
+                        self.log.info('Insufficient space to download and install %s' % loop_pkg.pkg_name)  # NOQA
+                        # Exit with error status
+                        sys.exit(1)
             else:
                 # Only download if this isn't a deployment run
                 if not self.deployment_mode:
-                    self.download(loop)
+                    self.download(loop_pkg)
 
         def update_pkg_sizes(loop):
             # Only add download and install size info if
@@ -704,18 +713,18 @@ class AppleLoops():
 
         # To be able to check if a loop is within threshold/free disk space
         # iterate over the loops
-        for loop in loops:
+        for _loop in loops:
             # Only care about mandatory or optional, because other arguments are taken care of elsewhere.  # NOQA
             if any([self.mandatory_loops, self.optional_loops]):
                 # If mandatory argument supplied and loop is mandatory
-                if self.mandatory_loops and loop.pkg_mandatory:  # NOQA
-                    update_pkg_sizes(loop)
-                    download_or_install(loop)
+                if self.mandatory_loops and _loop.pkg_mandatory:  # NOQA
+                    update_pkg_sizes(_loop)
+                    download_or_install(_loop)
 
                 # If optional argument supplied and loop is optional
-                if self.optional_loops and not loop.pkg_mandatory:  # NOQA
-                    update_pkg_sizes(loop)
-                    download_or_install(loop)
+                if self.optional_loops and not _loop.pkg_mandatory:  # NOQA
+                    update_pkg_sizes(_loop)
+                    download_or_install(_loop)
             else:
                 print 'Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops.'  # NOQA
                 self.log.info('Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops. Exiting.')  # NOQA
@@ -728,24 +737,19 @@ class AppleLoops():
         return int(plistlib.readPlistFromString(result)['FreeSpace'])
 
     def loop_installed(self, pkg_id):
+        '''Returns if a package is installed'''
         cmd = ['/usr/sbin/pkgutil', '--pkg-info-plist', pkg_id]
         (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
 
         if result:
-            try:
-                if readPlistFromString(result.strip()):
-                    # Only care if we can read the plist
-                    result = True
-            except:
-                # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
-                result = False
-
-        if error:
-            # If there is an error, then the package is probably not installed.
-            # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
-            result = False
-
-        return result
+            # need to use plistlib as this doesn't cause issues with tests
+            _pkg_id = plistlib.readPlistFromString(result)['pkgid']
+            if pkg_id in _pkg_id:
+                return True
+            else:
+                return False
+        else:
+            return False
 
     def local_version(self, pkg_id):
         cmd = ['/usr/sbin/pkgutil', '--pkg-info-plist', pkg_id]
@@ -753,18 +757,17 @@ class AppleLoops():
 
         if result:
             try:
-                result = readPlistFromString(result.strip())
-                result = result['pkg-version']
+                ver = plistlib.readPlistFromString(result)['pkg-version']
             except:
                 # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
-                result = 0
+                ver = 0
 
         if error:
             # If there is an error, then the package is probably not installed.
             # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
-            result = 0
+            ver = 0
 
-        return result
+        return ver
 
     def download(self, pkg):
         # The mighty power of curl. Using `-L -C - <url>` to resume the download if a file exists.  # NOQA
@@ -914,6 +917,7 @@ class AppleLoops():
                 self.log.debug('Not in dry run, so attempting to install %s' % pkg.pkg_name)  # NOQA
                 print '  Installing: %s' % pkg.pkg_name
                 (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
+
                 if 'successful' in result:
                     print '  Installed: %s' % pkg.pkg_name
                     self.log.info('Installed: %s' % pkg.pkg_name)
