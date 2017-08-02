@@ -411,6 +411,7 @@ class AppleLoops():
                     print('-' * 15)  # NOQA
                     if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
                         print 'Nothing to do here, have some coffee! :)'  # NOQA
+                        self.log.info('Nothing to do here, have some coffee! :)')  # NOQA
                         sys.exit(0)
                     else:
                         print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
