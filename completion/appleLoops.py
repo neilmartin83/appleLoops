@@ -8,8 +8,9 @@ _appleLoops() {
   COMPREPLY=()
 
   cur="${COMP_WORDS[COMP_CWORD]}"
-  opts="--apps --build-dmg --cache-server --destination --deployment --dry-run \
-    --mandatory-only --mirror-paths --optional-only --pkg-server --plists --quiet" 
+  opts="--apps --build-dmg --cache-server --debug --destination --deployment \
+    --dry-run --hard-link --log-path --mandatory-only --mirror-paths \
+    --optional-only --pkg-server --plists --threshold --quiet --version"
 
   case "$cur" in
     --*)
