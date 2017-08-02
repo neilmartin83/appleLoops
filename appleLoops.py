@@ -34,6 +34,7 @@ import plistlib
 import sys
 import shutil
 import subprocess
+import traceback
 try:
     import requests
 except:
@@ -63,8 +64,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.1'
-__date__ = '2017-08-01'
+__version__ = '2.1.2'
+__date__ = '2017-08-02'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -170,8 +171,8 @@ class AppleLoops():
 
             if not len(self.log.handlers):
                 self.log_file = os.path.join(self.log_path, 'appleLoops.log')
-                if debug:
-                    self.debug = debug
+                self.debug = debug
+                if self.debug:
                     self.log.setLevel(logging.DEBUG)
                 else:
                     self.log.setLevel(logging.INFO)
@@ -402,6 +403,7 @@ class AppleLoops():
                     except Exception as e:
                         # If there is an exception, it's likely because the plist for the app doesn't exist. Skip.  # NOQA
                         if self.debug:
+                            self.log.debug(traceback.format_exc())
                             self.log.debug('Exception: %s' % e)
                         self.log.info('Skipping %s as it does not appear to be installed.' % app)  # NOQA
                         pass
@@ -615,18 +617,21 @@ class AppleLoops():
                 _pkg_installed = self.loop_installed(_pkg_id)
 
             # If pkg installed, get version
-            try:
+            # Local version is an awful version string to compare: 2.0.0.0.1.1447702152  # NOQA
+            if _pkg_installed:
                 _pkg_local_ver = self.local_version(_pkg_id)
-                _pkg_local_ver = str(_pkg_local_ver)
-            except:
-                _pkg_local_ver = '0.0'
+                _pkg_local_ver = '.'.join(str(_pkg_local_ver).split('.')[:3])
 
-            # If the feed has a PackageVersion, get it.
-            try:
-                # Apple uses long type, but need to make it a number then a string to compare with Loose/StrictVersion()  # NOQA
-                _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))  # NOQA
-            except:
-                _pkg_remote_ver = '0.0'
+                # Get the remote package version if it exists
+                try:
+                    # Apple uses long type, but need to make it a number then a string to compare with Loose/StrictVersion()  # NOQA
+                    _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))  # NOQA
+                except:
+                    _pkg_remote_ver = '0.0.0'
+            else:
+                # Don't need to worry about pkg versions if not installed.
+                _pkg_local_ver = '0.0.0'
+                _pkg_remote_ver = '0.0.0'
 
             # Do a version check to handle any pkgs that are upgrades
             # Need to try Loose/Strict as version could be either
@@ -642,8 +647,8 @@ class AppleLoops():
                 except:
                     # Presume pkg not installed if both version tests fail
                     _pkg_installed = False
-                    _pkg_local_ver = '0.0'
-                    _pkg_remote_ver = '0.0'
+                    _pkg_local_ver = '0.0.0'
+                    _pkg_remote_ver = '0.0.0'
 
             if not self.deployment_mode:
                 _pkg_installed = False
@@ -767,12 +772,12 @@ class AppleLoops():
                 ver = plistlib.readPlistFromString(result)['pkg-version']
             except:
                 # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
-                ver = 0
+                ver = '0.0.0'
 
         if error:
             # If there is an error, then the package is probably not installed.
             # Unlikely to happen, because Apple seems to send stderr to stdout here.  # NOQA
-            ver = 0
+            ver = '0.0.0'
 
         return ver
 
