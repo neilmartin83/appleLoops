@@ -615,6 +615,8 @@ class AppleLoops():
             # the feed, so can't compare if updates are required.
             if self.deployment_mode:
                 _pkg_installed = self.loop_installed(_pkg_id)
+            elif not self.deployment_mode:
+               _pkg_installed = False
 
             # If pkg installed, get version
             # Local version is an awful version string to compare: 2.0.0.0.1.1447702152  # NOQA
@@ -649,9 +651,6 @@ class AppleLoops():
                     _pkg_installed = False
                     _pkg_local_ver = '0.0.0'
                     _pkg_remote_ver = '0.0.0'
-
-            if not self.deployment_mode:
-                _pkg_installed = False
 
             if self.destination:
                 # The base folder will be the app name and version, i.e. garageband1020  # NOQA
