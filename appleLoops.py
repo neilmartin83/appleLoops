@@ -45,7 +45,6 @@ from collections import namedtuple
 from distutils.version import LooseVersion, StrictVersion
 from glob import glob
 from logging.handlers import RotatingFileHandler
-from time import strftime
 from urlparse import urlparse
 
 # Imports specifically for FoundationPlist
@@ -64,8 +63,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.2'
-__date__ = '2017-08-02'
+__version__ = '2.1.3'
+__date__ = '2017-08-03'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -142,7 +141,7 @@ class AppleLoops():
         destination: A string, path to save packages in, and create a DMG in (if specified).  # NOQA
                      For example: '/Users/jappleseed/Desktop/loops'
                      Use "" to escape paths with weird characters (like spaces).
-                     If nothing is supplied, defaults to /tmp
+                     If nothing is supplied, defaults to ~/Library/Logs
         dmg_filename: A string, filename to save the DMG as.
         dry_run: Boolean, when true, does a dummy run without downloading anything.  # NOQA
                  Default is True.
@@ -155,8 +154,8 @@ class AppleLoops():
                      
     '''
     def __init__(self, apps=None, apps_plist=None, caching_server=None,
-                 destination='/tmp', deployment_mode=False,
-                 dmg_filename=None, dry_run=True, mandatory_loops=False,
+                 destination='/tmp', deployment_mode=False, dmg_filename=None,
+                 force_dmg=False, dry_run=True, mandatory_loops=False,
                  mirror_paths=False, optional_loops=False, pkg_server=False,
                  quiet_mode=False, help_init=False, hard_link=False,
                  log_path=False, space_threshold=5, debug=False):
@@ -165,7 +164,7 @@ class AppleLoops():
             if log_path:
                 self.log_path = os.path.expanduser(os.path.expandvars(log_path))  # NOQA
             elif not log_path:
-                self.log_path = '/tmp'
+                self.log_path = os.path.expanduser(os.path.expandvars('~/Library/Logs'))  # NOQA
 
             self.log = logging.getLogger('appleLoops')
 
@@ -185,14 +184,34 @@ class AppleLoops():
         # Dry run, yo.
         self.dry_run = dry_run
 
+        # Exit codes for when things go bad
+        self.exit_codes = {
+            'root': [3, 'Must be root to run in deployment mode.'],
+            'config_read': [4, 'Unable to read configuration file'],
+            'cache_srv_format': [5, 'Invalid caching server URL format. Must be http://example.org:port'],  # NOQA
+            'apps_plist_combo': [6, 'Cannot use --apps or --plists with --deployment'],  # NOQA
+            'plist_deployment_combo': [7, 'Cannot use --plists or --deployment with --apps'],  # NOQA
+            'apps_deployment_combo': [8, 'Cannot use --apps or --deployment with --plists'],  # NOQA
+            'freespace_threshold': [9, 'Not enough free space to install packages with value of #### provided by --threshold'],  # NOQA
+            'insufficient_freespace': [10, 'Insufficient free space to download and install packages'],  # NOQA
+            'nospace': [11, 'No loops will be installed. Install exceeds available freespace of ####'],  # NOQA
+            'loop_types': [12, 'Must specify -m/--mandatory or -o/--optional or both to download loops.'],  # NOQA
+            'dmg_file_exists': [13, '#### file already exists.'],
+            'end_in_plist': [14, 'Specified arugment must end with .plist'],  # NOQA
+            'no_cache_connection': [15, 'Test connection to caching server failed.'],  # NOQA
+            'no_pkg_srv_connection': [16, 'Test connection to local package server failed.'],  # NOQA
+            'not_all_loops_installed': [17, 'Not all loops installed: ####'],  # NOQA
+            'general_exception': [18, 'Exception: ####'],
+            'remove_dmg': [19, 'Could not remove file ####'],
+        }
+
         # If deployment mode, and not a dry run, must be root to install loops.
         if deployment_mode:
             if not self.dry_run:
                 if os.getuid() == 0:
                     self.deployment_mode = True
                 else:
-                    print 'Must be root to run in deployment mode.'
-                    sys.exit(1)
+                    self.exit('root')
             else:
                 self.deployment_mode = True
         else:
@@ -210,13 +229,10 @@ class AppleLoops():
                 self.configuration = plistlib.readPlistFromString(configuration)  # NOQA
             else:
                 print req.status_code
-                self.log.debug('Unable to read configuration file. Exiting.')
-                print 'Unable to read configuration file.'
-                sys.exit(1)
+                self.exit('config_read')
         except Exception as e:
-            self.log.debug('Unable to read configuration file %s Exiting.' % e)
-            print 'Unable to read configuration file. %s' % e
-            sys.exit(1)
+            self.log.debug(e)
+            self.exit('config_read')
 
         # Supported apps
         self.supported_apps = ['garageband', 'logicpro', 'mainstage']
@@ -268,10 +284,18 @@ class AppleLoops():
             if caching_server:
                 if caching_server.startswith('http://'):
                     self.caching_server = caching_server.rstrip('/')
+                    # Test if the caching server provides a valid response
+                    # Set to false if it doesn't
+                    try:
+                        cache_srv_request = requests.get(self.caching_server)
+                        if cache_srv_request.status_code != 400:
+                            self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
+                            self.caching_server = False
+                    except requests.exceptions.ConnectionError:
+                        self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
+                        self.caching_server = False
                 else:
-                    self.log.debug('Caching server format must be http://example.org:45698 - Exiting.')  # NOQA
-                    print 'Caching Server format must be http://example.org:45698'  # NOQA
-                    sys.exit(1)
+                    self.exit('cache_srv_format')
             else:
                 self.caching_server = False
 
@@ -286,6 +310,9 @@ class AppleLoops():
                 self.dmg_filename = os.path.join(dmg_root_dest, dmg_filename)  # NOQA
             else:
                 self.dmg_filename = False
+
+            # Forces the creation of a DMG file if one already exists
+            self.force_dmg = force_dmg
 
             self.mandatory_loops = mandatory_loops
             self.mirror_paths = mirror_paths
@@ -305,12 +332,12 @@ class AppleLoops():
                     try:
                         # This is the standard location for the munki client config  # NOQA
                         self.pkg_server = readPlist('/Library/Preferences/ManagedInstalls.plist')['SoftwareRepoURL']  # NOQA
-                        self.log.info('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
+                        self.printlog('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
                     except:
                         # If we can't find a munki server, fallback to using
                         # Apple's servers.
                         self.pkg_server = False
-                        self.log.debug('Falling back to use Apple servers for package downloads.')  # NOQA
+                        self.printlog('Falling back to use Apple servers for package downloads.')  # NOQA
             else:
                 # If nothing is provided
                 self.pkg_server = False
@@ -359,33 +386,45 @@ class AppleLoops():
             if self.dry_run:
                 self.size_info['available_space'] = self.space_available()
 
+        # Maintain a list of loops that failed to install in deployment mode  # NOQA
+        if self.deployment_mode:
+            self.failed_installs = []
+
+    def exit(self, error, custom_msg=None):
+        exit_code = self.exit_codes[error][0]
+        error_msg = self.exit_codes[error][1]
+
+        if custom_msg:
+            error_msg = error_msg.replace('####', custom_msg)
+
+        print error_msg
+        self.log.info('sys.exit(%s) - %s' % (exit_code, error_msg))
+        sys.exit(exit_code)
+
+    def printlog(self, message):
+        print message
+        self.log.info(message)
+
     def main_processor(self):
         # Some feedback to stdout for CLI use
         if not self.quiet_mode:
             if self.mirror_paths:
                 if not self.dry_run:
-                    print 'Starting run at %s' % strftime("%Y-%m-%d %H:%M:%S")
-                    print 'Loops downloading to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
-                    self.log.info('Loops downloading to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+                    self.printlog('Loops downloading to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
                 else:
-                    print 'Dry run - loops download to: %s (mirroring Apple folder structure).' % self.destination  # NOQA
-                    self.log.info('Dry run - loops download to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
+                    self.printlog('Dry run - loops download to: %s (mirroring Apple folder structure.)' % self.destination)  # NOQA
 
             else:
                 if not self.dry_run:
-                    print 'Loops downloading to: %s' % self.destination
-                    self.log.info('Loops downloading to: %s' % self.destination)  # NOQA
+                    self.printlog('Loops downloading to: %s' % self.destination)  # NOQA
                 else:
-                    print 'Dry run - loops download to: %s' % self.destination
-                    self.log.info('Dry run - loops download to: %s' % self.destination)  # NOQA
+                    self.printlog('Dry run - loops download to: %s' % self.destination)  # NOQA
 
             if self.caching_server:
-                print 'Caching Server: %s' % self.caching_server
-                self.log.info('Caching server: %s' % self.caching_server)
+                self.printlog('Caching server: %s' % self.caching_server)
 
             if self.dmg_filename:
-                print 'DMG path: %s' % self.dmg_filename
-                self.log.info('DMG path: %s' % self.dmg_filename)
+                self.printlog('DMG path: %s' % self.dmg_filename)
 
         # If there are local plists, lets get the basenames because
         # this will be useful for munki install runs.
@@ -405,46 +444,44 @@ class AppleLoops():
                         if self.debug:
                             self.log.debug(traceback.format_exc())
                             self.log.debug('Exception: %s' % e)
-                        self.log.info('Skipping %s as it does not appear to be installed.' % app)  # NOQA
+                        self.printlog('Skipping %s as it does not appear to be installed.' % app)  # NOQA
                         pass
                 if self.dry_run:
                     print('-' * 15)  # NOQA
                     if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
-                        print 'Nothing to do here, have some coffee! :)'  # NOQA
-                        self.log.info('Nothing to do here, have some coffee! :)')  # NOQA
+                        self.printlog('Nothing to do here, have some coffee! :)')  # NOQA
                         sys.exit(0)
                     else:
-                        print 'Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total']))  # NOQA
+                        self.printlog('Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total'])))  # NOQA
                         if self.space_threshold:
-                            print 'Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space'])  # NOQA
-                            print 'Protected free space: %s' % self.convert_size(self.size_info['reserved_space'])  # NOQA
+                            self.printlog('Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space']))  # NOQA
+                            self.printlog('Protected free space: %s' % self.convert_size(self.size_info['reserved_space']))  # NOQA
                             if self.size_info['install_total'] < self.size_info['new_available_space']:  # NOQA
-                                print 'All loops will be installed, sufficient free space'  # NOQA
-                                self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                                self.printlog('All loops will be installed, sufficient free space')  # NOQA
                             else:
-                                print 'No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space'])  # NOQA
-                                self.log.info('No loops will be installed, as %s is the required free space.' % self.convert_size(self.size_info['reserved_space']))  # NOQA
+                                self.exit('freespace_threshold', custom_msg=self.convert_size(self.size_info['reserved_space']))  # NOQA
 
                         if not self.space_threshold:
-                            print 'Free space: %s' % self.convert_size(self.space_available())  # NOQA
+                            self.printlog('Free space: %s' % self.convert_size(self.space_available()))  # NOQA
                             if self.size_info['install_total'] < self.space_available():  # NOQA
-                                print 'All loops will be installed, sufficient free space'  # NOQA
-                                self.log.info('All loops will be installed, sufficient free space')  # NOQA
+                                self.printlog('All loops will be installed, sufficient free space')  # NOQA
                             else:
-                                print 'No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available())  # NOQA
-                                self.log.info('No loops will be installed. Install exceeds available space of %s.' % self.convert_size(self.space_available()))  # NOQA
+                                self.exit('nospace', custom_msg=self.convert_size(self.space_available()))  # NOQA
+                if not self.dry_run and len(self.failed_installs) > 0:
+                    self.exit('not_all_loops_installed', custom_msg=', '.join(self.failed_installs))  # NOQA
             else:
-                print 'Can\'t use apps or app_plist with deployment_mode.'
-                self.log.info('Can\'t use apps or app_plist with deployment mode.')  # NOQA
-                sys.exit(1)
+                self.exit('apps_plist_combo')
 
         # Handle where just an app name is provided. This will default
         # to getting the loop content for the latest version.
         if self.apps:
             # Check if .plist exists in self.apps
             if '.plist' in self.apps:
-                print 'Please remove the .plist extension.'
-                sys.exit(1)
+                print self.apps
+                self.apps = [x.replace('.plist', '') for x in self.apps]
+                print self.apps
+                # print 'Please remove the .plist extension.'
+                # sys.exit(1)
 
             if not any([self.apps_plist, self.deployment_mode]):
                 for app in self.apps:
@@ -467,9 +504,7 @@ class AppleLoops():
                                 fallback_url = '%s%s/%s' % (self.alt_base_url, self.mainstage_loop_year, plist)  # NOQA
                                 self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
             else:
-                print 'Can\'t use apps_plist or deployment_mode with app mode.'
-                sys.log.info('Can\'t use apps_plist or deployment_mode with app mode.')  # NOQA
-                sys.exit(1)
+                self.exit('plist_deployment_combo')
 
         if self.apps_plist:
             if not any([self.apps, self.deployment_mode]):
@@ -481,15 +516,10 @@ class AppleLoops():
                     fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, plist)  # NOQA
                     self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
             else:
-                print 'Can\'t use apps or deployment_mode with apps_plist.'
-                sys.log.info('Can\'t use apps or deployment_mode with apps_plist.')  # NOQA
-                sys.exit(1)
+                self.exit('apps_deployment_combo')
 
         if self.dmg_filename:
             self.build_dmg(self.dmg_filename)
-
-        if not self.quiet_mode and not self.dry_run:
-            print 'Finished run at %s' % strftime("%Y-%m-%d %H:%M:%S")
 
     # Functions
     def plist_url(self, app):
@@ -505,8 +535,7 @@ class AppleLoops():
         PlistURLs = namedtuple('PlistURls', ['apple', 'fallback'])
 
         if not self.quiet_mode:
-            print 'Processing loops from: %s' % app_plist
-            self.log.info('Processing loops from: %s' % app_plist)
+            self.printlog('Processing loops from: %s' % app_plist)
 
         return PlistURLs(
             apple=apple_url,
@@ -585,6 +614,8 @@ class AppleLoops():
                     req = requests.head(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server))  # NOQA
                     if req.status_code == 200:
                         _pkg_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
+                    else:
+                        self.log.info('Falling back to Apple server for %s' % _pkg_name)  # NOQA
 
             # Mandatory or optional
             try:
@@ -617,7 +648,7 @@ class AppleLoops():
             if self.deployment_mode:
                 _pkg_installed = self.loop_installed(_pkg_id)
             elif not self.deployment_mode:
-               _pkg_installed = False
+                _pkg_installed = False
 
             # If pkg installed, get version
             # Local version is an awful version string to compare: 2.0.0.0.1.1447702152  # NOQA
@@ -696,9 +727,7 @@ class AppleLoops():
             '''Internal function to download/install depending on arguments'''  # NOQA
             if self.space_threshold and not self.dry_run:
                 if self.size_info['install_total'] >= self.size_info['new_available_space']:  # NOQA
-                    print 'Aborting, will exceed threshold space limit of %s if loops are installed.' % self.convert_size(self.size_info['new_available_space'])  # NOQA
-                    self.log.info('Aborting, will exceed threshold space limit of %s if loops are installed.' % self.convert_size(self.size_info['new_available_space']))  # NOQA
-                    sys.exit(1)
+                    self.exit('freespace_threshold')
 
             if self.deployment_mode:
                 if not loop_pkg.pkg_installed:
@@ -707,10 +736,7 @@ class AppleLoops():
                         self.download(loop_pkg)
                         self.install_pkg(loop_pkg)
                     else:
-                        print 'Insufficient space to download and install %s' % loop_pkg.pkg_name  # NOQA
-                        self.log.info('Insufficient space to download and install %s' % loop_pkg.pkg_name)  # NOQA
-                        # Exit with error status
-                        sys.exit(1)
+                        self.exit('insufficient_freespace')
             else:
                 # Only download if this isn't a deployment run
                 if not self.deployment_mode:
@@ -738,9 +764,7 @@ class AppleLoops():
                     update_pkg_sizes(_loop)
                     download_or_install(_loop)
             else:
-                print 'Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops.'  # NOQA
-                self.log.info('Must specify either \'-m, --mandatory-only\' or \'-o, --optional-only\' to download loops. Exiting.')  # NOQA
-                sys.exit(1)
+                self.exit('loop_types')
 
     def space_available(self):
         cmd = ['/usr/sbin/diskutil', 'info', '-plist', '/']
@@ -797,8 +821,7 @@ class AppleLoops():
                 if self.dry_run:
                     if not self.quiet_mode:
                         if not self.deployment_mode or not pkg.pkg_installed:
-                            print 'Download: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size))  # NOQA
-                            self.log.info('Download: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
+                            self.printlog('Download: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
 
                     # Add this to self.files_found so we can test on the next go around  # NOQA
                     if self.files_found:
@@ -807,8 +830,7 @@ class AppleLoops():
                 else:
                     if not self.quiet_mode:
                         # Do some quick tests if pkg_server is specified
-                        print 'Downloading: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size))  # NOQA
-                        self.log.info('Downloading: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
+                        self.printlog('Downloading: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
 
                     # For some reason this was indented into the above not self.quiet, it shouldn't be  # NOQA
                     subprocess.check_call(cmd)
@@ -819,15 +841,14 @@ class AppleLoops():
 
         elif os.path.exists(pkg.pkg_destination):
             if not self.quiet_mode:
-                print 'Skipping: %s' % pkg.pkg_name
-                self.log.info('Skipping %s' % pkg.pkg_name)
+                self.printlog('Skipping %s' % pkg.pkg_name)
 
     def percentage(self, percentage, value):
         '''Returns the calculated percentage of the provided value'''
         if percentage < 100:
             return (int(percentage) * int(value)) / 100
         else:
-            raise Exception('%s Exceeds 100%' % percentage)
+            return (int(percentage) * 99 / 100)
 
     def convert_size(self, file_size, precision=2):
         '''Converts the package file size into a human readable number.'''
@@ -839,8 +860,9 @@ class AppleLoops():
                 file_size = file_size/1024.0
 
             return '%.*f %s' % (precision, file_size, suffixes[suffix_index])  # NOQA
-        except Exception as e:
-            raise e
+        except Exception:
+            # Yes, an exception can occur, but ignore it
+            pass
 
     def duplicate_file_exists(self, pkg):
         '''Simple test to see if a duplicate file exists elsewhere.
@@ -852,11 +874,9 @@ class AppleLoops():
                     if pkg.pkg_name in os.path.basename(source_file):  # NOQA
                         if self.dry_run:
                             if self.hard_link:
-                                print 'Hard link existing file: %s' % pkg.pkg_name  # NOQA
-                                self.log.info('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
+                                self.printlog('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
                             else:
-                                print 'Copy existing file: %s' % pkg.pkg_name
-                                self.log.info('Copy existing file: %s' % pkg.pkg_name)  # NOQA
+                                self.printlog('Copy existing file: %s' % pkg.pkg_name)  # NOQA
 
                         # If not a dry run, do the thing
                         if not self.dry_run:
@@ -866,9 +886,8 @@ class AppleLoops():
                                     if not os.path.exists(os.path.dirname(pkg.pkg_destination)):  # NOQA
                                         os.makedirs(os.path.dirname(pkg.pkg_destination))  # NOQA
                                         self.log.debug('Created %s to store packages.' % os.path.dirname(pkg.pkg_destination))  # NOQA
-                                except:
-                                    self.log.debug('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
-                                    raise Exception('Could not make directory %s' % os.path.dirname(pkg.pkg_destination))  # NOQA
+                                except Exception as e:
+                                    self.exit('general_exception', custom_msg=e)  # NOQA
 
                                 # Try to hard link or copy the file
                                 if self.hard_link:
@@ -876,30 +895,30 @@ class AppleLoops():
                                         # Create a hard link to save space
                                         os.link(source_file, pkg.pkg_destination)  # NOQA
                                         if not self.quiet_mode:
-                                            print 'Hard linked existing file: %s' % pkg.pkg_name  # NOQA
-                                            self.log.info('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
+                                            self.printlog('Hard link existing file: %s' % pkg.pkg_name)  # NOQA
                                     except Exception as e:
-                                        self.log.info('Hard link operation failed: %s' % e)  # NOQA
-                                        raise Exception('Hard link operation failed: %s' % e)  # NOQA
+                                        self.exit('general_exception', custom_msg=e)  # NOQA
                                 else:
                                     try:
                                         shutil.copy2(source_file, pkg.pkg_destination)  # NOQA
                                         if not self.quiet_mode:
-                                            print 'Copied existing file: %s' % pkg.pkg_name  # NOQA
-                                            self.log.info('Copied existing file: %s' % pkg.pkg_name)  # NOQA
+                                            self.printlog('Copied existing file: %s' % pkg.pkg_name)  # NOQA
                                     except Exception as e:
-                                        self.log.info('Copy operation failed: %s' % e)  # NOQA
-                                        raise Exception('Copy operation failed: %s' % e)  # NOQA
+                                        self.exit('general_exception', custom_msg=e)  # NOQA
                     # Be explicit about not matching any item in self.files_found here, otherwise excessive downloads  # NOQA
                     elif not any(x.endswith(pkg.pkg_name) for x in self.files_found):  # NOQA
                         # Raise exception if the file doesn't match any files discovered in self.found_files  # NOQA
+                        # Don't need to exit on this exception because this is a trigger for downloading  # NOQA
                         self.log.debug('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
                         raise Exception('%s does not exist in found files.' % pkg.pkg_name)  # NOQA
             else:
-                self.log.debug('self.files_found list is probably empty because this directory either has no identifiable loops, or the directory does not exist.')  # NOQA
-                raise Exception('Files Found list does not exist')
+                error_msg = 'Loop %s not found in download path, assuming not downloaded.' % pkg.pkg_name  # NOQA
+                self.log.debug(error_msg)
+                # Don't need to exit on this exception because this is a trigger for downloading  # NOQA
+                raise Exception(error_msg)
         elif self.deployment_mode:
             # Still need to raise an exception to trigger a download
+            # Don't need to exit on this exception because this is a trigger for downloading  # NOQA
             raise Exception('Deployment mode download')
 
     def install_pkg(self, pkg, target=None, allow_untrusted=False):
@@ -910,6 +929,12 @@ class AppleLoops():
             if not target:
                 target = '/'
 
+            def failed_install(pkg):
+                # Update the failed_installs list
+                if self.failed_installs:
+                    if pkg.pkg_name not in self.failed_installs:
+                        self.failed_installs.append(pkg.pkg_name)
+
             cmd = ['/usr/sbin/installer', '-pkg', pkg.pkg_destination, '-target', target]  # NOQA
             # Allow untrusted is useful if the Apple cert has expired, but is not necessarily best practice.  # NOQA
             # In this instance, if one must allow untrusted pkgs to be signed, then you'll need to change the install_pkg() in process_pkgs() function.  # NOQA
@@ -919,35 +944,31 @@ class AppleLoops():
 
             if self.dry_run:
                 if pkg.pkg_install_size < self.size_info['available_space']:
-                    print '  Install: %s' % pkg.pkg_name  # NOQA
+                    self.printlog('  Install: %s' % pkg.pkg_name)  # NOQA
                     self.size_info['available_space'] = (self.size_info['available_space'] - pkg.pkg_install_size)  # NOQA
                 elif pkg.pkg_install_size > self.size_info['available_space']:
-                    print '  Cannot install (insufficient space): %s' % pkg.pkg_name  # NOQA
-                    self.log.info('Cannot install (insufficient space): %s' % pkg.pkg_name)  # NOQA
+                    self.printlog('  Cannot install (insufficient space): %s' % pkg.pkg_name)  # NOQA
 
             if not self.dry_run:
                 self.log.debug('Not in dry run, so attempting to install %s' % pkg.pkg_name)  # NOQA
-                print '  Installing: %s' % pkg.pkg_name
+                self.printlog('  Installing: %s' % pkg.pkg_name)
                 (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
 
                 if 'successful' in result:
-                    print '  Installed: %s' % pkg.pkg_name
-                    self.log.info('Installed: %s' % pkg.pkg_name)
+                    self.printlog('  Installed: %s' % pkg.pkg_name)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
-                        self.log.debug('Error removing package: %s' % e)
-                        raise e
+                        self.exit('general_exception', custom_msg=e)
                 elif 'upgrade' in result:
-                    print 'Upgraded: %s' % pkg.pkg_name
-                    self.log.info('Upgraded: %s' % pkg.pkg_name)
+                    self.printlog('Upgraded: %s' % pkg.pkg_name)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
-                        self.log.debug('Error removing package: %s' % e)
-                        raise e
+                        self.exit('general_exception', custom_msg=e)
                 else:
                     self.log.debug('Install does not appear to be successful: %s' % result)  # NOQA
+                    failed_install(pkg)
                     try:
                         self.log.debug('Attempting to remove %s after install was not successful.' % pkg.pkg_name)  # NOQA
                         os.remove(pkg.pkg_destination)
@@ -955,14 +976,13 @@ class AppleLoops():
                         self.log.debug('Error removing package after install failure: %s' % e)  # NOQA
 
                 if error or any(x in result.lower() for x in ['fail', 'failed']):  # NOQA
-                    print 'Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name  # NOQA
-                    self.log.info('Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name)  # NOQA
+                    self.printlog('Install failed, check /var/log/installer.log for any info: %s' % pkg.pkg_name)  # NOQA
+                    failed_install(pkg)
                     self.log.debug('Install error: %s' % error)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
-                        self.log.debug('Error removing package: %s' % e)
-                        raise e
+                        self.exit('general_exception', custom_msg=e)
 
     def build_dmg(self, dmg_filename):
         '''Builds a DMG. Default filename is appleLoops_YYYY-MM-DD.dmg.'''  # NOQA
@@ -973,12 +993,20 @@ class AppleLoops():
         else:
             if not os.path.exists(dmg_filename):
                 if not self.quiet_mode:
-                    print 'Building %s' % dmg_filename
+                    self.printlog('Building %s' % dmg_filename)
 
                 subprocess.check_call(cmd)
             else:
-                print '%s already exists.' % dmg_filename
-                sys.exit(1)
+                if self.force_dmg:
+                    try:
+                        self.printlog('Removing DMG %s' % dmg_filename)
+                        self.printlog('Building %s' % dmg_filename)
+                        os.remove(dmg_filename)
+                        subprocess.check_call(cmd)
+                    except:
+                        self.exit('remove_dmg', custom_msg=dmg_filename)
+                else:
+                    self.exit('dmg_file_exists', custom_msg=dmg_filename)
 
 
 # Main!
@@ -1076,6 +1104,14 @@ def main():
         action='store_true',
         dest='deployment',
         help='Runs in deployment mode (download and install loops).',  # NOQA
+        required=False
+    )
+
+    parser.add_argument(
+        '--force-dmg',
+        action='store_true',
+        dest='force_dmg',
+        help='Overwrites existing DMG if the file already exists.',
         required=False
     )
 
@@ -1193,6 +1229,11 @@ def main():
         else:
             _dmg_filename = None
 
+        if args.force_dmg:
+            _force_dmg = args.force_dmg
+        else:
+            _force_dmg = False
+
         if args.cache_server:  # NOQA
             _cache_server = args.cache_server[0]
         else:
@@ -1253,7 +1294,7 @@ def main():
                 _plists = args.plists
             else:
                 print 'Specified argument option must end with .plist'
-                sys.exit(1)
+                sys.exit(14)
         else:
             _plists = None
 
@@ -1268,10 +1309,11 @@ def main():
             _hard_link = False
 
         al = AppleLoops(apps=_apps, apps_plist=_plists, caching_server=_cache_server, destination=_destination,  # NOQA
-                        deployment_mode=_deployment, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
-                        mandatory_loops=_mandatory, mirror_paths=_mirror, optional_loops=_optional,  # NOQA
-                        pkg_server=_pkg_server, quiet_mode=_quiet, hard_link=_hard_link, help_init=False,  # NOQA
-                        log_path=_log_path, space_threshold=_space_threshold, debug=_debug)  # NOQA
+                        deployment_mode=_deployment, dmg_filename=_dmg_filename, force_dmg=_force_dmg,  # NOQA
+                        dry_run=_dry_run, mandatory_loops=_mandatory, mirror_paths=_mirror,  # NOQA
+                        optional_loops=_optional, pkg_server=_pkg_server, quiet_mode=_quiet,  # NOQA
+                        hard_link=_hard_link, help_init=False, log_path=_log_path,  # NOQA
+                        space_threshold=_space_threshold, debug=_debug)  # NOQA
         al.main_processor()
     else:
         al = AppleLoops(help_init=True)
