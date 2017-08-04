@@ -22,6 +22,8 @@ https://github.com/munki/munki
 
 Requirements:
     - python 2.7.10 (as shipped in macOS X)
+    - requests module - http://docs.python-requests.org/en/master/
+
 '''
 
 # Imports for general use
@@ -33,7 +35,11 @@ import sys
 import shutil
 import subprocess
 import traceback
-import urllib2
+try:
+    import requests
+except:
+    print 'requests module must be installed. sudo easy_install requests'
+    sys.exit(1)
 
 from collections import namedtuple
 from distutils.version import LooseVersion, StrictVersion
@@ -57,7 +63,7 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.4'
+__version__ = '2.1.3'
 __date__ = '2017-08-03'
 
 __license__ = 'Apache License, Version 2.0'
@@ -119,33 +125,6 @@ def readPlistFromString(data):
         return dataObject
 
 
-# Requests
-class Requests():
-    def __init__(self):
-        self.timeout = 5
-
-    '''Simplify url requests'''
-    def response_code(self, url):
-        try:
-            return urllib2.urlopen(url, timeout=self.timeout).getcode()
-        except urllib2.HTTPError as e:
-            return e.getcode()
-        except urllib2.URLError as e:
-            return e
-
-    def get_headers(self, url):
-        try:
-            return dict(urllib2.urlopen(url, timeout=self.timeout).info())
-        except Exception as e:
-            return e
-
-    def read_data(self, url):
-        try:
-            return urllib2.urlopen(url, timeout=self.timeout).read()
-        except Exception as e:
-            return e
-
-
 # AppleLoops
 class AppleLoops():
     '''
@@ -205,9 +184,6 @@ class AppleLoops():
         # Dry run, yo.
         self.dry_run = dry_run
 
-        # Initialise requests
-        self.request = Requests()
-
         # Exit codes for when things go bad
         self.exit_codes = {
             'root': [3, 'Must be root to run in deployment mode.'],
@@ -245,12 +221,14 @@ class AppleLoops():
         # self.configuration_file = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
         self.configuration_file = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/com.github.carlashley.appleLoops.configuration.plist'  # NOQA
         try:
-            if self.request.response_code(self.configuration_file) == 200:
+            req = requests.head(self.configuration_file)
+            if req.status_code == 200:
                 # Full configuration dictionary
-                configuration = self.request.read_data(self.configuration_file)  # NOQA
+                configuration = requests.get(self.configuration_file).text  # NOQA
                 # For some reason, munki readPlistFromString doesn't play well with getting this plist, so reverting to plistlib.  # NOQA
                 self.configuration = plistlib.readPlistFromString(configuration)  # NOQA
             else:
+                print req.status_code
                 self.exit('config_read')
         except Exception as e:
             self.log.debug(e)
@@ -309,11 +287,11 @@ class AppleLoops():
                     # Test if the caching server provides a valid response
                     # Set to false if it doesn't
                     try:
-                        # The caching service should send back a HTTP bad request status code if it exists  # NOQA
-                        if self.request.response_code(self.caching_server) != 400:  # NOQA
+                        cache_srv_request = requests.get(self.caching_server)
+                        if cache_srv_request.status_code != 400:
                             self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
                             self.caching_server = False
-                    except:
+                    except requests.exceptions.ConnectionError:
                         self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
                         self.caching_server = False
                 else:
@@ -567,25 +545,25 @@ class AppleLoops():
     def get_feed(self, apple_url, fallback_url):
         '''Returns the feed as a dictionary from either the Apple URL or the fallback URL, pending result code.'''  # NOQA
         # Initalise request, and check for 404's
-        apple_url_request = self.request.response_code(apple_url)
-        fallback_url_request = self.request.response_code(fallback_url)
-        if apple_url_request == 404:
+        req = requests.head(apple_url)  # request.head for speed
+        if req.status_code == 404:
             # Use fallback URL
             self.log.debug('Falling back to alternate feed: %s' % fallback_url)  # NOQA
-            if fallback_url_request == 200:
+            req = requests.head(fallback_url)  # request.head for speed
+            if req.status_code == 200:
                 req = {
                     'app_feed_file': os.path.basename(fallback_url),
-                    'result': readPlistFromString(self.request.read_data(fallback_url))  # NOQA
+                    'result': readPlistFromString(requests.get(fallback_url, stream=True).raw.read())  # NOQA
                 }
                 return req
             else:
                 self.log.info('There was a problem trying to reach %s' % fallback_url)  # NOQA
                 return Exception('There was a problem trying to reach %s' % fallback_url)  # NOQA
-        elif apple_url_request == 200:
+        elif req.status_code == 200:
             # Use Apple URL
             req = {
                 'app_feed_file': os.path.basename(apple_url),
-                'result': readPlistFromString(self.request.read_data(apple_url))  # NOQA
+                'result': readPlistFromString(requests.get(apple_url, stream=True).raw.read())  # NOQA
             }
             return req
         else:
@@ -633,7 +611,8 @@ class AppleLoops():
             if self.pkg_server and self.deployment_mode:
                 if not self.caching_server:
                     # Test each package path if pkg_server is provided, fallback if not reachable  # NOQA
-                    if self.request.response_code(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)) == 200:  # NOQA
+                    req = requests.head(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server))  # NOQA
+                    if req.status_code == 200:
                         _pkg_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
                     else:
                         self.log.info('Falling back to Apple server for %s' % _pkg_name)  # NOQA
@@ -646,8 +625,9 @@ class AppleLoops():
 
             # Package size
             try:
+                # Use requests.head to speed up getting the header for the file.  # NOQA
                 # Use int type to avoid exception errors.
-                _pkg_size = int(self.request.get_headers(_pkg_url)['content-length'])  # NOQA
+                _pkg_size = int(requests.head(_pkg_url).headers.get('content-length'))  # NOQA
             except:
                 _pkg_size = None
 
