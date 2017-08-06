@@ -31,6 +31,7 @@ import os
 import plistlib
 import sys
 import shutil
+import ssl
 import subprocess
 import traceback
 import urllib2
@@ -57,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.4'
-__date__ = '2017-08-03'
+__version__ = '2.1.5'
+__date__ = '2017-08-06'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -121,13 +122,17 @@ def readPlistFromString(data):
 
 # Requests
 class Requests():
-    def __init__(self):
+    '''Simplify url requests'''
+    def __init__(self, allow_insecure=False):
+        self.allow_insecure = allow_insecure
         self.timeout = 5
 
-    '''Simplify url requests'''
     def response_code(self, url):
         try:
-            return urllib2.urlopen(url, timeout=self.timeout).getcode()
+            if self.allow_insecure:
+                return urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).getcode()  # NOQA
+            else:
+                return urllib2.urlopen(url, timeout=self.timeout).getcode()
         except urllib2.HTTPError as e:
             return e.getcode()
         except urllib2.URLError as e:
@@ -135,13 +140,19 @@ class Requests():
 
     def get_headers(self, url):
         try:
-            return dict(urllib2.urlopen(url, timeout=self.timeout).info())
+            if self.allow_insecure:
+                return dict(urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).info())  # NOQA
+            else:
+                return dict(urllib2.urlopen(url, timeout=self.timeout).info())
         except Exception as e:
             return e
 
     def read_data(self, url):
         try:
-            return urllib2.urlopen(url, timeout=self.timeout).read()
+            if self.allow_insecure:
+                return urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).read()  # NOQA
+            else:
+                return urllib2.urlopen(url, timeout=self.timeout).read()
         except Exception as e:
             return e
 
@@ -174,24 +185,27 @@ class AppleLoops():
                Default is False. Replaces JSS mode in older versions.
                      
     '''
-    def __init__(self, apps=None, apps_plist=None, caching_server=None,
-                 destination='/tmp', deployment_mode=False, dmg_filename=None,
-                 force_dmg=False, dry_run=True, mandatory_loops=False,
-                 mirror_paths=False, optional_loops=False, pkg_server=False,
-                 quiet_mode=False, help_init=False, hard_link=False,
-                 log_path=False, space_threshold=5, debug=False):
+    def __init__(self, allow_insecure=False, apps=None, apps_plist=None,
+                 caching_server=None, debug=False, deployment_mode=False,
+                 destination='/tmp', dmg_filename=None, dry_run=True,
+                 force_deploy=False, force_dmg=False, hard_link=False,
+                 help_init=False, log_path=False, mandatory_loops=False,
+                 mirror_paths=False, muted_download=False,
+                 optional_loops=False, pkg_server=False, quiet_mode=False,
+                 space_threshold=5):
+
+        # Logging
         if not help_init:
-            # Logging
             if log_path:
                 self.log_path = os.path.expanduser(os.path.expandvars(log_path))  # NOQA
             elif not log_path:
                 self.log_path = os.path.expanduser(os.path.expandvars('~/Library/Logs'))  # NOQA
 
             self.log = logging.getLogger('appleLoops')
+            self.debug = debug
 
             if not len(self.log.handlers):
                 self.log_file = os.path.join(self.log_path, 'appleLoops.log')
-                self.debug = debug
                 if self.debug:
                     self.log.setLevel(logging.DEBUG)
                 else:
@@ -205,13 +219,16 @@ class AppleLoops():
         # Dry run, yo.
         self.dry_run = dry_run
 
-        # Initialise requests
-        self.request = Requests()
+        # Forces a re-download and install attempt even if loops are installed
+        self.force_deploy = force_deploy
+
+        # Mutes the download progress bar
+        self.muted_download = muted_download
 
         # Exit codes for when things go bad
         self.exit_codes = {
             'root': [3, 'Must be root to run in deployment mode.'],
-            'config_read': [4, 'Unable to read configuration file'],
+            'config_read': [4, 'Unable to read configuration file ####'],
             'cache_srv_format': [5, 'Invalid caching server URL format. Must be http://example.org:port'],  # NOQA
             'apps_plist_combo': [6, 'Cannot use --apps or --plists with --deployment'],  # NOQA
             'plist_deployment_combo': [7, 'Cannot use --plists or --deployment with --apps'],  # NOQA
@@ -241,28 +258,78 @@ class AppleLoops():
         else:
             self.deployment_mode = False
 
+        # Allows the --insecure flag to be used with curl
+        self.allow_insecure = allow_insecure
+
+        # Initialise requests
+        self.request = Requests(allow_insecure=self.allow_insecure)
+
+        # Setup pkg_server
+        if pkg_server:
+            # Don't need a trailing / in this address
+            if any([pkg_server.startswith('http://'), pkg_server.startswith('https://')]):  # NOQA
+                self.pkg_server = pkg_server.rstrip('/')
+            elif pkg_server == 'munki':
+                try:
+                    # This is the standard location for the munki client config  # NOQA
+                    self.pkg_server = readPlist('/Library/Preferences/ManagedInstalls.plist')['SoftwareRepoURL']  # NOQA
+                    self.printlog('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
+                except:
+                    # If we can't find a munki server, fallback to using
+                    # Apple's servers.
+                    self.pkg_server = False
+                    self.printlog('Falling back to use Apple servers for package downloads.')  # NOQA
+        else:
+            # If nothing is provided
+            self.pkg_server = False
+            if not help_init:
+                self.log.debug('No package server provided, falling back to use Apple servers for package downloads.')  # NOQA
+
         # Read in configuration
-        # self.configuration_file = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
-        self.configuration_file = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/com.github.carlashley.appleLoops.configuration.plist'  # NOQA
+        self.github_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/test'  # NOQA
+        self.config_file_path = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
+
+        # Read configuration file
+        # Test if pkg_server hosted version exists
+        # Fall back to github version if it doesn't
+        # Fall back to local copy if all else fails
+        # Finally exit with error if nothing works
         try:
-            if self.request.response_code(self.configuration_file) == 200:
-                # Full configuration dictionary
+            # If there is a pkg_server specified, try this first
+            if self.pkg_server:
+                self.configuration_file = os.path.join(self.pkg_server, self.config_file_path)  # NOQA
+            elif not self.pkg_server:
+                self.configuration_file = os.path.join(self.github_url, self.config_file_path)  # NOQA
+
+            # Test if either URL's work
+            if self.configuration_file.startswith('http') and self.request.response_code(self.configuration_file) == 200:  # NOQA
                 configuration = self.request.read_data(self.configuration_file)  # NOQA
                 # For some reason, munki readPlistFromString doesn't play well with getting this plist, so reverting to plistlib.  # NOQA
                 self.configuration = plistlib.readPlistFromString(configuration)  # NOQA
             else:
-                self.exit('config_read')
+                try:
+                    self.configuration_file = self.config_file_path
+                    self.configuration = plistlib.readPlist(self.configuration_file)  # NOQA
+                except:
+                    self.exit('config_read', custom_msg=self.configuration_file)  # NOQA
         except Exception as e:
             self.log.debug(e)
-            self.exit('config_read')
+            self.exit('config_read', custom_msg=self.configuration_file)
 
         # Supported apps
         self.supported_apps = ['garageband', 'logicpro', 'mainstage']
 
-        # Break configuration down into easier references
         # Base URLs
+        # If A pkg_server has been specified, and the test for falling
+        # back to a self hosted config has worked, then use the self
+        # hosted plists as fallback
         self.base_url = 'http://audiocontentdownload.apple.com/lp10_ms3_content_'  # NOQA
-        self.alt_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
+
+        # Configure alt base url
+        if self.pkg_server:
+            self.alt_base_url = os.path.join(self.pkg_server, 'lp10_ms3_content_')  # NOQA
+        else:
+            self.alt_base_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_'  # NOQA
 
         # GarageBand loops
         self.garageband_loop_year = self.configuration['loop_feeds']['garageband']['loop_year']  # NOQA
@@ -345,25 +412,6 @@ class AppleLoops():
 
             # Determines if file copy or hard link (to reduce disk usage)
             self.hard_link = hard_link
-
-            if pkg_server:
-                # Don't need a trailing / in this address
-                if pkg_server.startswith('http://'):
-                    self.pkg_server = pkg_server.rstrip('/')
-                elif pkg_server == 'munki':
-                    try:
-                        # This is the standard location for the munki client config  # NOQA
-                        self.pkg_server = readPlist('/Library/Preferences/ManagedInstalls.plist')['SoftwareRepoURL']  # NOQA
-                        self.printlog('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
-                    except:
-                        # If we can't find a munki server, fallback to using
-                        # Apple's servers.
-                        self.pkg_server = False
-                        self.printlog('Falling back to use Apple servers for package downloads.')  # NOQA
-            else:
-                # If nothing is provided
-                self.pkg_server = False
-                self.log.debug('No package server provided, falling back to use Apple servers for package downloads.')  # NOQA
 
             # Creating a list of files found in destination
             self.files_found = []
@@ -597,7 +645,7 @@ class AppleLoops():
         loops = []
         packages = app_feed_dict['result']['Packages']
 
-        # Values to put in the Loop named tuple
+        # Values to put in the Loop named tuple - lambda strips numbers from name  # NOQA
         _pkg_loop_for = ''.join(map(lambda c: '' if c in '0123456789' else c, os.path.splitext(app_feed_dict['app_feed_file'])[0]))  # NOQA
         _pkg_plist = app_feed_dict['app_feed_file']
 
@@ -635,8 +683,6 @@ class AppleLoops():
                     # Test each package path if pkg_server is provided, fallback if not reachable  # NOQA
                     if self.request.response_code(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)) == 200:  # NOQA
                         _pkg_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
-                    else:
-                        self.log.info('Falling back to Apple server for %s' % _pkg_name)  # NOQA
 
             # Mandatory or optional
             try:
@@ -666,7 +712,10 @@ class AppleLoops():
             # Apple doesn't include any package version information in
             # the feed, so can't compare if updates are required.
             if self.deployment_mode:
-                _pkg_installed = self.loop_installed(_pkg_id)
+                if not self.force_deploy:
+                    _pkg_installed = self.loop_installed(_pkg_id)
+                elif self.force_deploy:
+                    _pkg_installed = False
             elif not self.deployment_mode:
                 _pkg_installed = False
 
@@ -827,21 +876,44 @@ class AppleLoops():
 
     def download(self, pkg):
         # The mighty power of curl. Using `-L -C - <url>` to resume the download if a file exists.  # NOQA
-        if self.quiet_mode:
-            cmd = ['/usr/bin/curl', '--silent', '-L', '-C', '-', pkg.pkg_url, '--create-dirs', '-o', pkg.pkg_destination, '--user-agent', self.user_agent]  # NOQA
-        else:
-            cmd = ['/usr/bin/curl', '--progress-bar', '-L', '-C', '-', pkg.pkg_url, '--create-dirs', '-o', pkg.pkg_destination, '--user-agent', self.user_agent]  # NOQA
+        curl = ['/usr/bin/curl']
+        insecure = ['--insecure']
+        silent = ['--silent']
+        progress = ['--progress-bar']
+        common_args = ['-L', '-C', '-', pkg.pkg_url, '--create-dirs', '-o', pkg.pkg_destination, '--user-agent', self.user_agent]  # NOQA
+        download_log_msg = '%s (Package size: %s  Install size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size))  # NOQA
 
+        # Create the comand
+        if self.allow_insecure:
+            curl.extend(insecure)
+
+        if self.quiet_mode or self.muted_download:
+            silent.extend(common_args)
+            curl.extend(silent)
+        else:
+            progress.extend(common_args)
+            curl.extend(progress)
+
+        # After extending the curl list, now make it the cmd to be used
+        cmd = curl
+
+        # Handling duplicates
         if not os.path.exists(pkg.pkg_destination):
                 # Test if there is a duplicate. This also copies duplicates.
             try:
                 self.duplicate_file_exists(pkg)
             except:  # Exception as e:
+                # Log if the pkg url has fallen back direct to Apple in circumstances  # NOQA
+                if (self.pkg_server and 'audiocontentdownload.apple.com' in pkg.pkg_url) or (self.caching_server and '?source=' not in pkg.pkg_url):  # NOQA
+                    self.log.info('Falling back to Apple server for %s download' % _pkg_name)  # NOQA
                 # Use the exception to kick the download process.
                 if self.dry_run:
                     if not self.quiet_mode:
                         if not self.deployment_mode or not pkg.pkg_installed:
-                            self.printlog('Download: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
+                            if self.force_deploy:
+                                self.printlog('Force download: %s' % download_log_msg)  # NOQA
+                            else:
+                                self.printlog('Download: %s' % download_log_msg)  # NOQA
 
                     # Add this to self.files_found so we can test on the next go around  # NOQA
                     if self.files_found:
@@ -850,7 +922,10 @@ class AppleLoops():
                 else:
                     if not self.quiet_mode:
                         # Do some quick tests if pkg_server is specified
-                        self.printlog('Downloading: %s (Package size: %s  Installed size: %s)' % (pkg.pkg_name, self.convert_size(int(pkg.pkg_size)), self.convert_size(pkg.pkg_install_size)))  # NOQA
+                        if self.force_deploy:
+                            self.printlog('Force downloading: %s' % download_log_msg)  # NOQA
+                        else:
+                            self.printlog('Downloading: %s' % download_log_msg)
 
                     # For some reason this was indented into the above not self.quiet, it shouldn't be  # NOQA
                     subprocess.check_call(cmd)
@@ -964,14 +1039,22 @@ class AppleLoops():
 
             if self.dry_run:
                 if pkg.pkg_install_size < self.size_info['available_space']:
-                    self.printlog('  Install: %s' % pkg.pkg_name)  # NOQA
+                    if self.force_deploy:
+                        self.printlog('  Force install: %s' % pkg.pkg_name)  # NOQA
+                    else:
+                        self.printlog('  Install: %s' % pkg.pkg_name)  # NOQA
+
                     self.size_info['available_space'] = (self.size_info['available_space'] - pkg.pkg_install_size)  # NOQA
                 elif pkg.pkg_install_size > self.size_info['available_space']:
                     self.printlog('  Cannot install (insufficient space): %s' % pkg.pkg_name)  # NOQA
 
             if not self.dry_run:
                 self.log.debug('Not in dry run, so attempting to install %s' % pkg.pkg_name)  # NOQA
-                self.printlog('  Installing: %s' % pkg.pkg_name)
+                if self.force_deploy:
+                    self.printlog('  Force installing: %s' % pkg.pkg_name)
+                else:
+                    self.printlog('  Installing: %s' % pkg.pkg_name)
+
                 (result, error) = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()  # NOQA
 
                 if 'successful' in result:
@@ -1082,6 +1165,14 @@ def main():
     )
 
     parser.add_argument(
+        '--allow-insecure',
+        action='store_true',
+        dest='allow_insecure',
+        help='Uses --inscure flag for curl for https.',
+        required=False
+    )
+
+    parser.add_argument(
         '-b', '--build-dmg',
         type=str,
         nargs=1,
@@ -1128,6 +1219,14 @@ def main():
     )
 
     parser.add_argument(
+        '--force-deploy',
+        action='store_true',
+        dest='force_deploy',
+        help='Force deployment of packages regardless of install state',  # NOQA
+        required=False
+    )
+
+    parser.add_argument(
         '--force-dmg',
         action='store_true',
         dest='force_dmg',
@@ -1166,6 +1265,14 @@ def main():
         action='store_true',
         dest='mirror',
         help='Mirror the Apple server paths in the destination.',
+        required=False
+    )
+
+    parser.add_argument(
+        '--mute-progress-bar',
+        action='store_true',
+        dest='muted_download',
+        help='Disable the download progress bar',
         required=False
     )
 
@@ -1239,6 +1346,11 @@ def main():
             print version_string
             sys.exit(0)
 
+        if args.allow_insecure:
+            _allow_insecure = True
+        else:
+            _allow_insecure = False
+
         if args.apps:
             _apps = args.apps
         else:
@@ -1274,6 +1386,11 @@ def main():
         else:
             _deployment = False
 
+        if args.force_deploy:
+            _force_deploy = True
+        else:
+            _force_deploy = False
+
         if args.mandatory:
             _mandatory = True
         else:
@@ -1288,6 +1405,11 @@ def main():
             _mirror = True
         else:
             _mirror = False
+
+        if args.muted_download:
+            _muted_download = True
+        else:
+            _muted_download = False
 
         if args.dry_run:
             _dry_run = True
@@ -1328,12 +1450,14 @@ def main():
         else:
             _hard_link = False
 
-        al = AppleLoops(apps=_apps, apps_plist=_plists, caching_server=_cache_server, destination=_destination,  # NOQA
-                        deployment_mode=_deployment, dmg_filename=_dmg_filename, force_dmg=_force_dmg,  # NOQA
-                        dry_run=_dry_run, mandatory_loops=_mandatory, mirror_paths=_mirror,  # NOQA
-                        optional_loops=_optional, pkg_server=_pkg_server, quiet_mode=_quiet,  # NOQA
-                        hard_link=_hard_link, help_init=False, log_path=_log_path,  # NOQA
-                        space_threshold=_space_threshold, debug=_debug)  # NOQA
+        al = AppleLoops(allow_insecure=_allow_insecure, apps=_apps, apps_plist=_plists,  # NOQA
+                        caching_server=_cache_server, debug=_debug, deployment_mode=_deployment,  # NOQA
+                        destination=_destination, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
+                        force_deploy=_force_deploy, force_dmg=_force_dmg, hard_link=_hard_link, help_init=False,  # NOQA
+                        log_path=_log_path, mandatory_loops=_mandatory, mirror_paths=_mirror,  # NOQA
+                        muted_download=_muted_download, optional_loops=_optional, pkg_server=_pkg_server,  # NOQA
+                        quiet_mode=_quiet, space_threshold=_space_threshold)  # NOQA
+
         al.main_processor()
     else:
         al = AppleLoops(help_init=True)
