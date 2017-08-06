@@ -909,7 +909,7 @@ class AppleLoops():
             except:  # Exception as e:
                 # Log if the pkg url has fallen back direct to Apple in circumstances  # NOQA
                 if (self.pkg_server and 'audiocontentdownload.apple.com' in pkg.pkg_url) or (self.caching_server and '?source=' not in pkg.pkg_url):  # NOQA
-                    self.log.info('Falling back to Apple server for %s download' % _pkg_name)  # NOQA
+                    self.log.info('Falling back to Apple server for %s download' % pkg.pkg_name)  # NOQA
                 # Use the exception to kick the download process.
                 if self.dry_run:
                     if not self.quiet_mode:
