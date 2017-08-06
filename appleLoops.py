@@ -58,7 +58,7 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.5'
+__version__ = '2.1.6'
 __date__ = '2017-08-06'
 
 __license__ = 'Apache License, Version 2.0'
@@ -185,14 +185,14 @@ class AppleLoops():
                Default is False. Replaces JSS mode in older versions.
                      
     '''
-    def __init__(self, allow_insecure=False, apps=None, apps_plist=None,
-                 caching_server=None, debug=False, deployment_mode=False,
-                 destination='/tmp', dmg_filename=None, dry_run=True,
-                 force_deploy=False, force_dmg=False, hard_link=False,
-                 help_init=False, log_path=False, mandatory_loops=False,
-                 mirror_paths=False, muted_download=False,
-                 optional_loops=False, pkg_server=False, quiet_mode=False,
-                 space_threshold=5):
+    def __init__(self, allow_insecure=False, allow_untrusted=False,
+                 apps=None, apps_plist=None, caching_server=None,
+                 debug=False, deployment_mode=False, destination='/tmp',
+                 dmg_filename=None, dry_run=True, force_deploy=False,
+                 force_dmg=False, hard_link=False, help_init=False,
+                 log_path=False, mandatory_loops=False, mirror_paths=False,
+                 muted_download=False, optional_loops=False, pkg_server=False,
+                 quiet_mode=False, space_threshold=5):
 
         # Logging
         if not help_init:
@@ -260,6 +260,10 @@ class AppleLoops():
 
         # Allows the --insecure flag to be used with curl
         self.allow_insecure = allow_insecure
+
+        # Allow install with untrusted certs
+        # Default is not to allow pkg installs with untrusted certs
+        self.allow_untrusted = allow_untrusted
 
         # Initialise requests
         self.request = Requests(allow_insecure=self.allow_insecure)
@@ -1016,7 +1020,7 @@ class AppleLoops():
             # Don't need to exit on this exception because this is a trigger for downloading  # NOQA
             raise Exception('Deployment mode download')
 
-    def install_pkg(self, pkg, target=None, allow_untrusted=False):
+    def install_pkg(self, pkg, target=None):
         '''Installs the package onto the system when used in deployment mode.
         Attempts to install then delete the downloaded package.'''
         # Only install if the package isn't already installed.
@@ -1030,12 +1034,21 @@ class AppleLoops():
                     if pkg.pkg_name not in self.failed_installs:
                         self.failed_installs.append(pkg.pkg_name)
 
-            cmd = ['/usr/sbin/installer', '-pkg', pkg.pkg_destination, '-target', target]  # NOQA
+            base_cmd = ['/usr/sbin/installer']
+            untrusted = ['-allowUntrusted']
+            pkg_args = ['-pkg', pkg.pkg_destination, '-target', target]
+
+            # If allow untrusted is set, extend base_cmd
             # Allow untrusted is useful if the Apple cert has expired, but is not necessarily best practice.  # NOQA
-            # In this instance, if one must allow untrusted pkgs to be signed, then you'll need to change the install_pkg() in process_pkgs() function.  # NOQA
-            if allow_untrusted:
-                cmd = ['/usr/sbin/installer', '-allowUntrusted', '-pkg', pkg.pkg_destination, '-target', target]  # NOQA
-                self.log.debug('Allowing untrusted package to be installed: %s' % pkg.pkg_name)  # NOQA
+            if self.allow_untrusted:
+                self.log.info('Argument --allowUntrusted in use for: %s' % pkg.pkg_name)  # NOQA
+                base_cmd.extend(untrusted)
+
+            # Extend base_cmd with the package arguments
+            base_cmd.extend(pkg_args)
+
+            # Build the cmd
+            cmd = base_cmd
 
             if self.dry_run:
                 if pkg.pkg_install_size < self.size_info['available_space']:
@@ -1085,6 +1098,7 @@ class AppleLoops():
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
+                        self.log.debug(traceback.format_exc())
                         self.exit('general_exception', custom_msg=e)
 
     def build_dmg(self, dmg_filename):
@@ -1169,6 +1183,14 @@ def main():
         action='store_true',
         dest='allow_insecure',
         help='Uses --inscure flag for curl for https.',
+        required=False
+    )
+
+    parser.add_argument(
+        '--allow-untrusted',
+        action='store_true',
+        dest='allow_untrusted',
+        help='Uses the --allowUntrasted flag for installer',
         required=False
     )
 
@@ -1351,6 +1373,11 @@ def main():
         else:
             _allow_insecure = False
 
+        if args.allow_untrusted:
+            _allow_untrusted = True
+        else:
+            _allow_untrusted = False
+
         if args.apps:
             _apps = args.apps
         else:
@@ -1450,7 +1477,7 @@ def main():
         else:
             _hard_link = False
 
-        al = AppleLoops(allow_insecure=_allow_insecure, apps=_apps, apps_plist=_plists,  # NOQA
+        al = AppleLoops(allow_insecure=_allow_insecure, allow_untrusted=_allow_untrusted, apps=_apps, apps_plist=_plists,  # NOQA
                         caching_server=_cache_server, debug=_debug, deployment_mode=_deployment,  # NOQA
                         destination=_destination, dmg_filename=_dmg_filename, dry_run=_dry_run,  # NOQA
                         force_deploy=_force_deploy, force_dmg=_force_dmg, hard_link=_hard_link, help_init=False,  # NOQA
