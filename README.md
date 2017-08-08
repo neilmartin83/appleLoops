@@ -1,12 +1,6 @@
 # appleLoops.py
 
-## Test information advisory
-This is a testing branch, only use for testing purposes. Use in production at your own risk.
-
-**NOTE** A number of old command line arguments are no longer implemented, please run `./appleLoops.py --help` for all usage options.
-
 ## Requirements
-- `requests` module, installable with `sudo easy_install requests` - clients must also be able to access `https://pypi.python.org/`
 - python shipped with macOS (typically `python 2.7.10`)
 - Active connection that can access `https://raw.githubusercontent.com` and `http://audiocontentdownload.apple.com`
 
@@ -28,10 +22,7 @@ When `appleLoops.py` is run with the `--deployment` argument, it will check the 
 Based on the combination of `-m/--mandatory-only`/`-o/--optional-only` it will install or upgrade any necessary loops, skipping over loops that are already installed.
 When a loop has been downloaded, it is installed, then removed from the `/tmp` folder, repeated until the process is completed.
 
-
-### Clone the test branch
-Use `git clone https://github.com/carlashley/appleLoops --single-branch --branch test` to clone _just_ the `test` branch before continuing.
-
+## Deployment
 ### Simple deployment process
 1. Whether deploying using munki or Casper Pro/JSS, Make sure `requests` module is installed on the machine that the loops need to be installed on. This can be done using `easy_install requests` (may need to be `root` to do this).
 2. The app that loops are being installed for _must_ be installed before using `appleLoops.py` to deploy the loop packages.
