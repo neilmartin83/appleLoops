@@ -235,10 +235,10 @@ class AppleLoops():
             'apps_deployment_combo': [8, 'Cannot use --apps or --deployment with --plists'],  # NOQA
             'freespace_threshold': [9, 'Not enough free space to install packages with value of #### provided by --threshold'],  # NOQA
             'insufficient_freespace': [10, 'Insufficient free space to download and install packages'],  # NOQA
-            'nospace': [11, 'No loops will be installed. Install exceeds available freespace of ####'],  # NOQA
+            'nospace': [11, 'No loops will be installed. Install exceeds available free space of ####'],  # NOQA
             'loop_types': [12, 'Must specify -m/--mandatory or -o/--optional or both to download loops.'],  # NOQA
             'dmg_file_exists': [13, '#### file already exists.'],
-            'end_in_plist': [14, 'Specified arugment must end with .plist'],  # NOQA
+            'end_in_plist': [14, 'Specified argument must end with .plist'],  # NOQA
             'no_cache_connection': [15, 'Test connection to caching server failed.'],  # NOQA
             'no_pkg_srv_connection': [16, 'Test connection to local package server failed.'],  # NOQA
             'not_all_loops_installed': [17, 'Not all loops installed: ####'],  # NOQA
