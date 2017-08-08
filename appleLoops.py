@@ -58,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.6'
-__date__ = '2017-08-06'
+__version__ = '2.1.7'
+__date__ = '2017-08-08'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -460,9 +460,13 @@ class AppleLoops():
             if self.dry_run:
                 self.size_info['available_space'] = self.space_available()
 
-        # Maintain a list of loops that failed to install in deployment mode  # NOQA
+        # Maintain a summary of actions taken in deployment mode
         if self.deployment_mode:
-            self.failed_installs = []
+            self.deployment_summary = {
+                'failed_installs': [],
+                'successful_installs': 0,
+                'downloaded_amount': 0,
+            }
 
     def exit(self, error, custom_msg=None):
         exit_code = self.exit_codes[error][0]
@@ -523,7 +527,7 @@ class AppleLoops():
                 if self.dry_run:
                     print('-' * 15)  # NOQA
                     if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
-                        self.printlog('Nothing to do here, have some coffee! :)')  # NOQA
+                        self.printlog('Nothing to install.')  # NOQA
                         sys.exit(0)
                     else:
                         self.printlog('Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total'])))  # NOQA
@@ -541,8 +545,12 @@ class AppleLoops():
                                 self.printlog('All loops will be installed, sufficient free space')  # NOQA
                             else:
                                 self.exit('nospace', custom_msg=self.convert_size(self.space_available()))  # NOQA
-                if not self.dry_run and len(self.failed_installs) > 0:
-                    self.exit('not_all_loops_installed', custom_msg=', '.join(self.failed_installs))  # NOQA
+                if not self.dry_run:
+                    summary_msg = 'Installed %s packages, downloaded %s' % (self.deployment_summary['successful_installs'], self.convert_size(self.deployment_summary['downloaded_amount']))  # NOQA
+                    self.printlog(summary_msg)
+
+                    if len(self.deployment_summary['failed_installs']) > 0:  # NOQA
+                        self.exit('not_all_loops_installed', custom_msg=', '.join(self.deployment_summary['failed_installs']))  # NOQA
             else:
                 self.exit('apps_plist_combo')
 
@@ -933,6 +941,10 @@ class AppleLoops():
 
                     # For some reason this was indented into the above not self.quiet, it shouldn't be  # NOQA
                     subprocess.check_call(cmd)
+
+                    # Update summary report
+                    self.deployment_summary['downloaded_amount'] = self.deployment_summary['downloaded_amount'] + pkg.pkg_size  # NOQA
+
                     # Add this to self.files_found so we can test on the next go around  # NOQA
                     if self.files_found:
                         if pkg.pkg_destination not in self.files_found:
@@ -1030,9 +1042,11 @@ class AppleLoops():
 
             def failed_install(pkg):
                 # Update the failed_installs list
-                if self.failed_installs:
-                    if pkg.pkg_name not in self.failed_installs:
-                        self.failed_installs.append(pkg.pkg_name)
+                if pkg.pkg_name not in self.deployment_summary['failed_installs']:  # NOQA
+                    self.deployment_summary['failed_installs'].append(pkg.pkg_name)  # NOQA
+
+            def successful_install():
+                self.deployment_summary['successful_installs'] = self.deployment_summary['successful_installs'] + 1  # NOQA
 
             base_cmd = ['/usr/sbin/installer']
             untrusted = ['-allowUntrusted']
@@ -1072,12 +1086,14 @@ class AppleLoops():
 
                 if 'successful' in result:
                     self.printlog('  Installed: %s' % pkg.pkg_name)
+                    successful_install()
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
                         self.exit('general_exception', custom_msg=e)
                 elif 'upgrade' in result:
                     self.printlog('Upgraded: %s' % pkg.pkg_name)
+                    successful_install()
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
