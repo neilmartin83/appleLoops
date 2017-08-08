@@ -290,7 +290,7 @@ class AppleLoops():
                 self.log.debug('No package server provided, falling back to use Apple servers for package downloads.')  # NOQA
 
         # Read in configuration
-        self.github_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/test'  # NOQA
+        self.github_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master'  # NOQA
         self.config_file_path = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
 
         # Read configuration file
