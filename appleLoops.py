@@ -461,12 +461,12 @@ class AppleLoops():
                 self.size_info['available_space'] = self.space_available()
 
         # Maintain a summary of actions taken in deployment mode
-        if self.deployment_mode:
-            self.deployment_summary = {
-                'failed_installs': [],
-                'successful_installs': 0,
-                'downloaded_amount': 0,
-            }
+        self.deployment_summary = {
+            'failed_installs': [],
+            'successful_installs': 0,
+            'downloaded_amount': 0,
+            'install_size': 0,
+        }
 
     def exit(self, error, custom_msg=None):
         exit_code = self.exit_codes[error][0]
@@ -526,7 +526,7 @@ class AppleLoops():
                         pass
                 if self.dry_run:
                     print('-' * 15)  # NOQA
-                    if all([self.size_info['download_total'], self.size_info['install_total']]) < 1:  # NOQA
+                    if all([self.deployment_summary['successful_installs'], len(self.deployment_summary['failed_installs']), self.deployment_summary['install_size']]) == 0:  # NOQA
                         self.printlog('Nothing to install.')  # NOQA
                         sys.exit(0)
                     else:
@@ -546,7 +546,9 @@ class AppleLoops():
                             else:
                                 self.exit('nospace', custom_msg=self.convert_size(self.space_available()))  # NOQA
                 if not self.dry_run:
-                    summary_msg = 'Installed %s packages, downloaded %s' % (self.deployment_summary['successful_installs'], self.convert_size(self.deployment_summary['downloaded_amount']))  # NOQA
+                    summary_msg = 'Installed %s packages, downloaded %s, install size %s' % (self.deployment_summary['successful_installs'],  # NOQA
+                                                                                             self.convert_size(self.deployment_summary['downloaded_amount']),  # NOQA
+                                                                                             self.convert_size(self.deployment_summary['install_size']))  # NOQA
                     self.printlog(summary_msg)
 
                     if len(self.deployment_summary['failed_installs']) > 0:  # NOQA
@@ -1045,8 +1047,9 @@ class AppleLoops():
                 if pkg.pkg_name not in self.deployment_summary['failed_installs']:  # NOQA
                     self.deployment_summary['failed_installs'].append(pkg.pkg_name)  # NOQA
 
-            def successful_install():
+            def successful_install(pkg):
                 self.deployment_summary['successful_installs'] = self.deployment_summary['successful_installs'] + 1  # NOQA
+                self.deployment_summary['install_size'] = self.deployment_summary['install_size'] + pkg.pkg_install_size  # NOQA
 
             base_cmd = ['/usr/sbin/installer']
             untrusted = ['-allowUntrusted']
@@ -1086,14 +1089,14 @@ class AppleLoops():
 
                 if 'successful' in result:
                     self.printlog('  Installed: %s' % pkg.pkg_name)
-                    successful_install()
+                    successful_install(pkg)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
                         self.exit('general_exception', custom_msg=e)
                 elif 'upgrade' in result:
                     self.printlog('Upgraded: %s' % pkg.pkg_name)
-                    successful_install()
+                    successful_install(pkg)
                     try:
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
