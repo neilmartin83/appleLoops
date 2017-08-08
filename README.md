@@ -1,132 +1,62 @@
 # appleLoops.py
 
-## What does it do?
-This utility can download all the essential content required by GarageBand, Logic Pro X, and MainStage, as well as optional content that is available for the same apps.
+## Test information advisory
+This is a testing branch, only use for testing purposes. Use in production at your own risk.
 
-**You are responsible for being appropriately licensed for any/all content downloaded with this tool.**
-
-## What this won't do
-* Install packages
-* Import packages into your package deployment system
-* Download content for older versions of GarageBand, Logic Pro X, and MainStage.
+**NOTE** A number of old command line arguments are no longer implemented, please run `./appleLoops.py --help` for all usage options.
 
 ## Requirements
-macOS with the system standard `python` and an active Internet connection.
+- `requests` module, installable with `sudo easy_install requests` - clients must also be able to access `https://pypi.python.org/`
+- python shipped with macOS (typically `python 2.7.10`)
+- Active connection that can access `https://raw.githubusercontent.com` and `http://audiocontentdownload.apple.com`
 
-## GarageBand first run behaviour
-The current version of GarageBand (10.1.6 as at 2017-02-13) does the following:
-- Downloads 35 'essential' packages (~1.96GB) for basic functionality
-- Prompts to download 357 optional packages (~18.62GB) for extended functionality
+## Capabilities
+- Download loops from Apple's servers
+- - Store downloaded loops in a mirrored path, useful for installing loops with this tool from a local http server.
+- - Can specify a caching server to download loops through
+- Build a DMG out of the downloaded loops (only at end of download run)
+- Install loops for any of these apps installed on a macOS system:
+- - GarageBand (10.1.1 or newer)
+- - Logic Pro X (10.2.1 or newer)
+- - MainStage 3 (3.2.3 or newer)
 
-## Logic Pro X first run behaviour
-The current version of Logic Pro X (10.3.0 as at 2017-01-19):
-- Requires 33 packages of 'essential' content (~1.96GB) for basic functionality
-- Has 567 optional packages (~43.73GB)
+## Installing loops
+Every so often, Apple likes to change the loops that a particular audio app requires to run. Keeping up with this using munki or Casper Pro/JSS can be a pain in the neck. To make this easier, `appleLoops.py` now has the ability to install loops using `--deployment` mode.
 
-## MainStage 3 first run behaviour
-The current version of MainStage 3 (3.3.0 as at 2017-03-27):
-- Requires 35 packages of 'essential' content (~1.67GB) for basic functionality
-- Has 552 optional packages (~43.47GB)
+When `appleLoops.py` is run with the `--deployment` argument, it will check the `/Applications` folder to determine if GarageBand, Logic Pro X, or MainStage 3 are installed. If any of these apps are installed, it looks for the included `plist` file that contains a list of all loops required for that app, next it checks what loops are installed (if any) and what are not installed.
 
-### Common Content
-All three apps do have a number of packages that are shared in common, both in the essential package sets, and optional package sets.
+Based on the combination of `-m/--mandatory-only`/`-o/--optional-only` it will install or upgrade any necessary loops, skipping over loops that are already installed.
+When a loop has been downloaded, it is installed, then removed from the `/tmp` folder, repeated until the process is completed.
 
-## Usage
-* `git clone https://github.com/carlashley/appleLoops`
-* `./appleLoops.py --help` for usage
 
-### Quick usage examples
-* `./appleLoops.py --help` show all options
-* `./appleLoops.py` will download all GarageBand content (optional and mandatory)
-* `./appleLoops.py --dry-run --package-set garageband --optional-only` will do a dry run for all GarageBand optional content
-* `./appleLoops.py --package-set garageband --mandatory-only` will download all essential GarageBand content
-* `./appleLoops.py --package-set logicpro --mandatory-only` will download all essential Logic Pro X content
-* `./appleLoops.py --package-set mainstage --cache-server http://cache_server:port --destination ~/Desktop/loops` will download all MainStage content through the specified caching server, and store packages in the `~/Desktop/loops` folder.
-* `/.appleLoops.py --file garageband1012.plist` will download all packages found in the `garageband1012.plist` file bundled with several versions of GarageBand.
+### Clone the test branch
+Use `git clone https://github.com/carlashley/appleLoops --single-branch --branch test` to clone _just_ the `test` branch before continuing.
 
-## Behaviour
+### Simple deployment process
+1. Whether deploying using munki or Casper Pro/JSS, Make sure `requests` module is installed on the machine that the loops need to be installed on. This can be done using `easy_install requests` (may need to be `root` to do this).
+2. The app that loops are being installed for _must_ be installed before using `appleLoops.py` to deploy the loop packages.
+3. `appleLoops.py` must be on the computer somewhere, i.e. `/usr/local/bin`. Must make the script executable and readable by `root`.
+4. _For current testing purposes, do a dry run before actual run:_ `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o`.
+5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o`. This needs to be run as `root`, you will be prompted to use `sudo` if necessary.
 
-### Proxies
-Untested - if there are issues with using this to download the content whilst behind a proxy, try downloading outside of the content, or if you can contribute some code to improve that behaviour, please feel free to create a pull request.
+### Advanced deployment process
+1. Download loops for _all_ apps you deploy, for example: ```./appleLoops.py --apps garageband mainstage --mirror-paths --destination /Volumes/Data/apple_audio_content --mandatory-only --optional-only```
+2. Get the folders `lp10_ms3_content_YYYY` (where `YYYY` represents a year) onto a web server your managed Macs have access to.
+3. Steps 1-3 as per _Simple deployment process_.
+4. _For current testing purposes, do a dry run before actual run: `/usr/local/bin/appleLoops.py --dry-run --deployment -m -o --pkg-server http://example.org/apple_loops`.
+5. Using the appropriate mechanism for your deployment tool, run: `/usr/local/bin/appleLoops.py --deployment -m -o --pkg-server http://example.org/apple_loops`. This needs to be run as `root`, you will be prompted to use `sudo` if necessary.
 
-### Package download location
-Packages will be saved into the `/tmp/appleLoops` folder by default, unless the `-d, --destination <folder>` flag and argument is provided.
+More information about deployment can be found in the [Wiki](../../wiki).
 
-To ensure that content is readily identifiable, it is stored in a folder within the `/tmp/appleLoops` depending on the plist file it was processed from, year, and whether it was mandatory or not.
+**Important note:**
 
-#### Example for GarageBand content:
-```
-[jcitizen@computer]:mandatory # pwd
-/tmp/appleLoops/garageband1012/2016/mandatory
-[jcitizen@computer]:mandatory # ls -lha
-total 4118408
-drwxr-xr-x  37 jcitizen  wheel   1.2K  3 Feb 18:19 .
-drwxr-xr-x   4 jcitizen  wheel   136B  3 Feb 17:55 ..
--rw-r--r--   1 jcitizen  wheel    11M  3 Feb 18:15 MAContent10_AssetPack_0048_AlchemyPadsDigitalHolyGhost.pkg
--rw-r--r--   1 jcitizen  wheel    19M  3 Feb 18:18 MAContent10_AssetPack_0310_UB_DrumMachineDesignerGB.pkg
--rw-r--r--   1 jcitizen  wheel    26M  3 Feb 18:19 MAContent10_AssetPack_0312_UB_UltrabeatKitsGBLogic.pkg
--rw-r--r--   1 jcitizen  wheel   153M  3 Feb 18:06 MAContent10_AssetPack_0314_AppleLoopsHipHop1.pkg
--rw-r--r--   1 jcitizen  wheel    40M  3 Feb 17:57 MAContent10_AssetPack_0315_AppleLoopsElectroHouse1.pkg
--rw-r--r--   1 jcitizen  wheel   7.1M  3 Feb 18:01 MAContent10_AssetPack_0316_AppleLoopsDubstep1.pkg
--rw-r--r--   1 jcitizen  wheel    17M  3 Feb 18:06 MAContent10_AssetPack_0317_AppleLoopsModernRnB1.pkg
--rw-r--r--   1 jcitizen  wheel    36M  3 Feb 18:15 MAContent10_AssetPack_0320_AppleLoopsChillwave1.pkg
--rw-r--r--   1 jcitizen  wheel    16M  3 Feb 18:08 MAContent10_AssetPack_0321_AppleLoopsIndieDisco.pkg
--rw-r--r--   1 jcitizen  wheel    16M  3 Feb 17:56 MAContent10_AssetPack_0322_AppleLoopsDiscoFunk1.pkg
--rw-r--r--   1 jcitizen  wheel    33M  3 Feb 18:16 MAContent10_AssetPack_0323_AppleLoopsVintageBreaks.pkg
--rw-r--r--   1 jcitizen  wheel    31M  3 Feb 18:14 MAContent10_AssetPack_0324_AppleLoopsBluesGarage.pkg
--rw-r--r--   1 jcitizen  wheel    21M  3 Feb 18:16 MAContent10_AssetPack_0325_AppleLoopsGarageBand1.pkg
--rw-r--r--   1 jcitizen  wheel   139M  3 Feb 18:11 MAContent10_AssetPack_0354_EXS_PianoSteinway.pkg
--rw-r--r--   1 jcitizen  wheel    16M  3 Feb 17:57 MAContent10_AssetPack_0357_EXS_BassAcousticUprightJazz.pkg
--rw-r--r--   1 jcitizen  wheel    35M  3 Feb 18:19 MAContent10_AssetPack_0358_EXS_BassElectricFingerStyle.pkg
--rw-r--r--   1 jcitizen  wheel    29M  3 Feb 17:56 MAContent10_AssetPack_0371_EXS_GuitarsAcoustic.pkg
--rw-r--r--   1 jcitizen  wheel    30M  3 Feb 18:19 MAContent10_AssetPack_0375_EXS_GuitarsVintageStrat.pkg
--rw-r--r--   1 jcitizen  wheel    22M  3 Feb 18:16 MAContent10_AssetPack_0482_EXS_OrchWoodwindAltoSax.pkg
--rw-r--r--   1 jcitizen  wheel    28M  3 Feb 18:00 MAContent10_AssetPack_0484_EXS_OrchWoodwindClarinetSolo.pkg
--rw-r--r--   1 jcitizen  wheel    26M  3 Feb 17:56 MAContent10_AssetPack_0487_EXS_OrchWoodwindFluteSolo.pkg
--rw-r--r--   1 jcitizen  wheel   186M  3 Feb 18:04 MAContent10_AssetPack_0491_EXS_OrchBrass.pkg
--rw-r--r--   1 jcitizen  wheel    48M  3 Feb 18:06 MAContent10_AssetPack_0509_EXS_StringsEnsemble.pkg
--rw-r--r--   1 jcitizen  wheel    18M  3 Feb 18:16 MAContent10_AssetPack_0536_DrummerClapsCowbell.pkg
--rw-r--r--   1 jcitizen  wheel    11M  3 Feb 17:56 MAContent10_AssetPack_0537_DrummerShaker.pkg
--rw-r--r--   1 jcitizen  wheel   804K  3 Feb 17:56 MAContent10_AssetPack_0538_DrummerSticks.pkg
--rw-r--r--   1 jcitizen  wheel    20M  3 Feb 18:06 MAContent10_AssetPack_0539_DrummerTambourine.pkg
--rw-r--r--   1 jcitizen  wheel   108K  3 Feb 17:56 MAContent10_AssetPack_0540_PlugInSettingsGB.pkg
--rw-r--r--   1 jcitizen  wheel   312K  3 Feb 17:56 MAContent10_AssetPack_0541_PlugInSettingsGBLogic.pkg
--rw-r--r--   1 jcitizen  wheel    20M  3 Feb 18:10 MAContent10_AssetPack_0554_AppleLoopsDiscoFunk2.pkg
--rw-r--r--   1 jcitizen  wheel   217M  3 Feb 17:58 MAContent10_AssetPack_0560_LTPBasicPiano1.pkg
--rw-r--r--   1 jcitizen  wheel   241M  3 Feb 18:03 MAContent10_AssetPack_0593_DrummerSoCalGBLogic.pkg
--rw-r--r--   1 jcitizen  wheel    15M  3 Feb 17:56 MAContent10_AssetPack_0597_LTPChordTrainer.pkg
--rw-r--r--   1 jcitizen  wheel   275M  3 Feb 18:09 MAContent10_AssetPack_0598_LTPBasicGuitar1.pkg
--rw-r--r--   1 jcitizen  wheel   212M  3 Feb 18:01 MAContent10_AssetPack_0599_GBLogicAlchemyEssentials.pkg
-[jcitizen@computer]:mandatory #
-```
+`appleLoops.py` expects to be able to find folders named `lp10_ms3_content_YYYY` wherever you've supplied the `--pkg-server` option, if it can't find packages in this location, it will fallback to using the Apple servers.
 
-### Duplicate content
-Where a package from one app is used in another app, if a local copy already exists in other folders, copy that into the new location instead of downloading it again.
+For machines managed with munki, `appleLoops.py` will attempt to find the munki `SoftwareRepoURL` in the configuration for that machine, for example `http://example.org/munki_repo` - make sure the folders `lp10_ms3_content_YYYY are in `munki_repo` (or appropraite folder as per your configuration).`
 
-This only checks the default `/tmp/appleLoops` path or the specified path supplied with the `-d` or `--destination-path` arguments.
+## Other usage
+For a full set of arguments/usage options, `./appleLoops.py --help`
 
-### Resume downloads
-Where possible, downloads are resumed (incomplete files are over-written).
 
-### Resume copies
-Tested behaviour indicates if a local copy already exists, and the new file doesn't or only partially exists, the utility will copy the existing file into the new location, and continue processing remaining files.
-
-_This could potentialy leave some files corrupted._
-
-# Copyright
-```
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-     https://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
-
-Elements of `FoundationPlist.py` from `munki` are used in this tool.
-https://github.com/munki/munki
+## Bug reports
+Please raise an issue to report any bugs.
