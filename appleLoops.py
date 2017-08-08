@@ -63,7 +63,7 @@ __date__ = '2017-08-08'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
-__status__ = 'Testing'
+__status__ = 'Production'
 
 version_string = '%s version %s (%s). Author: %s (licensed under the %s). Status: %s. GitHub: %s' % (__script__, __version__, __date__, __copyright__, __license__, __status__, __github__)  # NOQA
 
