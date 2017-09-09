@@ -58,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.7'
-__date__ = '2017-08-08'
+__version__ = '2.1.8'
+__date__ = '2017-09-09'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -515,15 +515,19 @@ class AppleLoops():
             if not any([self.apps, self.apps_plist]):
                 for app in self.supported_apps:
                     try:
-                        urls = self.plist_url(app)
-                        self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
+                        # Test if the plist for the app can be found, if not log the app doesn't appear to be installed.  # NOQA
+                        if len(glob(self.configuration['loop_feeds'][app]['app_path'])) > 0:  # NOQA
+                            urls = self.plist_url(app)
+                            self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
+                        else:
+                            self.printlog('Skipping %s as it does not appear to be installed.' % app)  # NOQA
+                            pass
                     except Exception as e:
-                        # If there is an exception, it's likely because the plist for the app doesn't exist. Skip.  # NOQA
-                        if self.debug:
-                            self.log.debug(traceback.format_exc())
-                            self.log.debug('Exception: %s' % e)
-                        self.printlog('Skipping %s as it does not appear to be installed.' % app)  # NOQA
-                        pass
+                        # Any exception raised here is probably a more
+                        # "serious" exception other than an app not installed.
+                        self.log.debug(traceback.format_exc())
+                        self.log.debug('Exception: %s' % e)
+                        raise e
                 if self.dry_run:
                     print('-' * 15)  # NOQA
                     if all([self.deployment_summary['successful_installs'], len(self.deployment_summary['failed_installs']), self.deployment_summary['install_size']]) == 0:  # NOQA
@@ -613,18 +617,24 @@ class AppleLoops():
         else:
             app_year = self.configuration['loop_feeds'][app]['loop_year']
 
-        app_plist = os.path.basename(glob(self.configuration['loop_feeds'][app]['app_path'])[0])  # NOQA
-        apple_url = '%s%s/%s' % (self.base_url, app_year, app_plist)  # NOQA
-        fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, app_plist)
-        PlistURLs = namedtuple('PlistURls', ['apple', 'fallback'])
+        # If we can glob the plist file, the app is probably installed.
+        # Return False if no glob matches.
+        if len(glob(self.configuration['loop_feeds'][app]['app_path'])) > 0:
+            app_plist = os.path.basename(glob(self.configuration['loop_feeds'][app]['app_path'])[0])  # NOQA
+            apple_url = '%s%s/%s' % (self.base_url, app_year, app_plist)  # NOQA
+            fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, app_plist)
+            PlistURLs = namedtuple('PlistURls', ['apple', 'fallback'])
 
-        if not self.quiet_mode:
-            self.printlog('Processing loops from: %s' % app_plist)
+            if not self.quiet_mode:
+                self.printlog('Processing loops from: %s' % app_plist)
 
-        return PlistURLs(
-            apple=apple_url,
-            fallback=fallback_url
-        )
+            return PlistURLs(
+                apple=apple_url,
+                fallback=fallback_url
+            )
+        else:
+            # App plist not found, return False
+            return False
 
     def get_feed(self, apple_url, fallback_url):
         '''Returns the feed as a dictionary from either the Apple URL or the fallback URL, pending result code.'''  # NOQA
