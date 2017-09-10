@@ -48,4 +48,8 @@ For a full set of arguments/usage options, `./appleLoops.py --help`
 
 
 ## Bug reports
-Please raise an issue to report any bugs.
+If you happen to run into issues, please raise an [issue](issues) with the following info:
+- The command used
+- Re-run the same command with the `--debug --log-path ~/Desktop` (or other suitable log path location)
+- - Include the log for the debug run in the issue
+- Version: `appleLoops.py --version`
