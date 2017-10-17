@@ -199,7 +199,10 @@ class AppleLoops():
             if log_path:
                 self.log_path = os.path.expanduser(os.path.expandvars(log_path))  # NOQA
             elif not log_path:
-                self.log_path = os.path.expanduser(os.path.expandvars('~/Library/Logs'))  # NOQA
+                if deployment_mode:
+                    self.log_path = '/var/log'
+                else:
+                    self.log_path = os.path.expanduser(os.path.expandvars('~/Library/Logs'))  # NOQA
 
             self.log = logging.getLogger('appleLoops')
             self.debug = debug
