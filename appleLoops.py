@@ -58,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.8'
-__date__ = '2017-09-09'
+__version__ = '2.1.9'
+__date__ = '2017-10-17'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -292,33 +292,43 @@ class AppleLoops():
         # Read in configuration
         self.github_url = 'https://raw.githubusercontent.com/carlashley/appleLoops/master'  # NOQA
         self.config_file_path = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
+        self.github_config_url = os.path.join(self.github_url, self.config_file_path)  # NOQA
 
-        # Read configuration file
-        # Test if pkg_server hosted version exists
-        # Fall back to github version if it doesn't
-        # Fall back to local copy if all else fails
-        # Finally exit with error if nothing works
+        # If pkg_server is specified, we can try this URL, otherwise fallback
+        # to the github config url.
         try:
-            # If there is a pkg_server specified, try this first
-            if self.pkg_server:
-                self.configuration_file = os.path.join(self.pkg_server, self.config_file_path)  # NOQA
-            elif not self.pkg_server:
-                self.configuration_file = os.path.join(self.github_url, self.config_file_path)  # NOQA
-
-            # Test if either URL's work
-            if self.configuration_file.startswith('http') and self.request.response_code(self.configuration_file) == 200:  # NOQA
-                configuration = self.request.read_data(self.configuration_file)  # NOQA
-                # For some reason, munki readPlistFromString doesn't play well with getting this plist, so reverting to plistlib.  # NOQA
-                self.configuration = plistlib.readPlistFromString(configuration)  # NOQA
+            # These try statements for the logging avoid exceptions when printing out the help text.  # NOQA
+            try:
+                self.log.debug('Trying specified package server {} for configuration'.format(self.pkg_server))  # NOQA
+            except:
+                pass
+            if self.pkg_server and self.config_url_reachable(os.path.join(self.pkg_server, self.config_file_path)):  # NOQA
+                # Test if the pkg server path is reachable
+                self.config_url = os.path.join(self.pkg_server, self.config_file_path)  # NOQA
+                config = self.request.read_data(self.config_url)
+                self.configuration = plistlib.readPlistFromString(config)  # NOQA
             else:
                 try:
-                    self.configuration_file = self.config_file_path
-                    self.configuration = plistlib.readPlist(self.configuration_file)  # NOQA
+                    self.log.debug('Trying github server for configuration')  # NOQA
                 except:
-                    self.exit('config_read', custom_msg=self.configuration_file)  # NOQA
-        except Exception as e:
-            self.log.debug(e)
-            self.exit('config_read', custom_msg=self.configuration_file)
+                    pass
+                # Fail to github and test if github is reachable
+                if self.config_url_reachable(self.github_config_url):
+                    self.config_url = self.github_config_url
+                    config = self.request.read_data(self.config_url)
+                    self.configuration = plistlib.readPlistFromString(config)  # NOQA
+        except:
+            try:
+                try:
+                    self.log.debug('Trying for local configuration file')
+                except:
+                    pass
+                # Fail to local copy
+                self.config_url = self.config_file_path
+                self.configuration = plistlib.readPlist(self.config_url)  # NOQA
+            except Exception as e:
+                self.log.debug(e)
+                self.exit('config_read', custom_msg=self.config_url)
 
         # Supported apps
         self.supported_apps = ['garageband', 'logicpro', 'mainstage']
@@ -483,6 +493,14 @@ class AppleLoops():
         print message
         self.log.info(message)
 
+    def config_url_reachable(self, configuration_url):
+        '''Returns True if the configuration file at github or self hosted
+        has HTTP status of 200, or False if anything else.'''
+        if configuration_url.startswith('http') and self.request.response_code(configuration_url) == 200:  # NOQA
+            return True
+        else:
+            return False
+
     def main_processor(self):
         # Some feedback to stdout for CLI use
         if not self.quiet_mode:
@@ -530,10 +548,12 @@ class AppleLoops():
                         raise e
                 if self.dry_run:
                     print('-' * 15)  # NOQA
-                    if all([self.deployment_summary['successful_installs'], len(self.deployment_summary['failed_installs']), self.deployment_summary['install_size']]) == 0:  # NOQA
+                    # If the install size is 0, there's probably nothing to install  # NOQA
+                    if self.deployment_summary['install_size'] == 0:
                         self.printlog('Nothing to install.')  # NOQA
                         sys.exit(0)
                     else:
+                        # Print out the install stats in dry-run mode.
                         self.printlog('Download total size: %s  Install total size: %s' % (self.convert_size(self.size_info['download_total']), self.convert_size(self.size_info['install_total'])))  # NOQA
                         if self.space_threshold:
                             self.printlog('Free space (threshold applied): %s' % self.convert_size(self.size_info['new_available_space']))  # NOQA
@@ -1083,6 +1103,8 @@ class AppleLoops():
                         self.printlog('  Force install: %s' % pkg.pkg_name)  # NOQA
                     else:
                         self.printlog('  Install: %s' % pkg.pkg_name)  # NOQA
+                    # Update installs to do
+                    self.deployment_summary['install_size'] = self.deployment_summary['install_size'] + pkg.pkg_install_size  # NOQA
 
                     self.size_info['available_space'] = (self.size_info['available_space'] - pkg.pkg_install_size)  # NOQA
                 elif pkg.pkg_install_size > self.size_info['available_space']:
@@ -1359,7 +1381,6 @@ def main():
         nargs='+',
         dest='plists',
         metavar=AppleLoops(help_init=True).supported_plists,
-        # metavar='<plist>',
         help='Processes all loops in specified plists.',
         required=False
     )
