@@ -58,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.1.9'
-__date__ = '2017-10-17'
+__version__ = '2.2.0'
+__date__ = '2017-11-15'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -281,11 +281,12 @@ class AppleLoops():
                     # This is the standard location for the munki client config  # NOQA
                     self.pkg_server = readPlist('/Library/Preferences/ManagedInstalls.plist')['SoftwareRepoURL']  # NOQA
                     self.printlog('Found munki ManagedInstalls.plist, using SoftwareRepoURL %s' % self.pkg_server)  # NOQA
-                except:
+                except Exception as e:
                     # If we can't find a munki server, fallback to using
                     # Apple's servers.
                     self.pkg_server = False
                     self.printlog('Falling back to use Apple servers for package downloads.')  # NOQA
+                    self.log.debug('Exception: %s' % e)
         else:
             # If nothing is provided
             self.pkg_server = False
@@ -308,6 +309,7 @@ class AppleLoops():
             if self.pkg_server and self.config_url_reachable(os.path.join(self.pkg_server, self.config_file_path)):  # NOQA
                 # Test if the pkg server path is reachable
                 self.config_url = os.path.join(self.pkg_server, self.config_file_path)  # NOQA
+                self.log.debug('Using %s for configuration url' % e)
                 config = self.request.read_data(self.config_url)
                 self.configuration = plistlib.readPlistFromString(config)  # NOQA
             else:
@@ -318,6 +320,7 @@ class AppleLoops():
                 # Fail to github and test if github is reachable
                 if self.config_url_reachable(self.github_config_url):
                     self.config_url = self.github_config_url
+                    self.log.debug('Using %s for configuration url' % e)
                     config = self.request.read_data(self.config_url)
                     self.configuration = plistlib.readPlistFromString(config)  # NOQA
         except:
@@ -330,7 +333,7 @@ class AppleLoops():
                 self.config_url = self.config_file_path
                 self.configuration = plistlib.readPlist(self.config_url)  # NOQA
             except Exception as e:
-                self.log.debug(e)
+                self.log.debug('Exception: %s' % e)
                 self.exit('config_read', custom_msg=self.config_url)
 
         # Supported apps
@@ -728,8 +731,14 @@ class AppleLoops():
             if self.pkg_server and self.deployment_mode:
                 if not self.caching_server:
                     # Test each package path if pkg_server is provided, fallback if not reachable  # NOQA
-                    if self.request.response_code(_pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)) == 200:  # NOQA
-                        _pkg_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
+                    try:
+                        mirrored_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
+                        if self.request.response_code(mirrored_url) == 200:  # NOQA
+                            _pkg_url = mirrored_url
+                        else:
+                            self.log.debug('Response code seeking %s is %s' % (mirrored_url, self.request.response_code(mirrored_url)))  # NOQA
+                    except Exception as e:
+                        self.log.debug('Exception: %s' % e)
 
             # Mandatory or optional
             try:
@@ -1033,6 +1042,7 @@ class AppleLoops():
                                         os.makedirs(os.path.dirname(pkg.pkg_destination))  # NOQA
                                         self.log.debug('Created %s to store packages.' % os.path.dirname(pkg.pkg_destination))  # NOQA
                                 except Exception as e:
+                                    self.log.debug('Exception: %s' % e)
                                     self.exit('general_exception', custom_msg=e)  # NOQA
 
                                 # Try to hard link or copy the file
