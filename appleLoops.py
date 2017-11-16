@@ -704,12 +704,6 @@ class AppleLoops():
         for pkg in packages:
             _pkg_name = packages[pkg]['DownloadName']
             _pkg_url = '%s%s/%s' % (self.base_url, _pkg_year, _pkg_name)
-
-            # Reformat URL if caching server specified
-            if self.caching_server:
-                _pkg_url = urlparse(_pkg_url)
-                _pkg_url = '%s%s?source=%s' % (self.caching_server, _pkg_url.path, _pkg_url.netloc)  # NOQA
-
             _pkg_destination_folder_year = _pkg_year
 
             # Some package names start with ../lp10_ms3_content_2013/
@@ -720,6 +714,12 @@ class AppleLoops():
 
                 _pkg_url = 'http://audiocontentdownload.apple.com/%s' % _pkg_name[3:]  # NOQA
                 _pkg_name = os.path.basename(_pkg_name)
+
+            # Reformat URL if caching server specified
+            if self.caching_server:
+                self.log.debug(_pkg_url)
+                _pkg_url = urlparse(_pkg_url)
+                _pkg_url = '%s%s?source=%s' % (self.caching_server, _pkg_url.path, _pkg_url.netloc)  # NOQA
 
             # If pkg_server is true, and deployment_mode has a list, use that
             # instead of Apple servers. Important note, the pkg_server must
