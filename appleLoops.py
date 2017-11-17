@@ -219,6 +219,9 @@ class AppleLoops():
                 self.fh.setFormatter(self.log_format)
                 self.log.addHandler(self.fh)
 
+                # Log the version info
+                self.log.info('Version: %s' % __version__)
+
         # Dry run, yo.
         self.dry_run = dry_run
 
@@ -298,6 +301,9 @@ class AppleLoops():
         self.config_file_path = 'com.github.carlashley.appleLoops.configuration.plist'  # NOQA
         self.github_config_url = os.path.join(self.github_url, self.config_file_path)  # NOQA
 
+        # Set up an empy self.configuration to fill, and use in catch later.
+        self.configuration = ''
+
         # If pkg_server is specified, we can try this URL, otherwise fallback
         # to the github config url.
         try:
@@ -333,8 +339,20 @@ class AppleLoops():
                 self.config_url = self.config_file_path
                 self.configuration = plistlib.readPlist(self.config_url)  # NOQA
             except Exception as e:
-                self.log.debug('Exception: %s' % e)
+                if not help_init:
+                    self.log.debug('Exception: %s' % e)
+
+        # This is a catch in case self.configuration is left empty.
+        if not self.configuration:
+            try:
+                config = self.request.read_data(self.github_config_url)
+                self.configuration = plistlib.readPlistFromString(config)  # NOQA
+            except Exception as e:
                 self.exit('config_read', custom_msg=self.config_url)
+                try:
+                    self.log.debug('Exception: %s' % e)
+                except:
+                    pass
 
         # Supported apps
         self.supported_apps = ['garageband', 'logicpro', 'mainstage']
