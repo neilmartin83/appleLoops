@@ -59,7 +59,7 @@ __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
 __version__ = '2.2.0'
-__date__ = '2017-11-15'
+__date__ = '2017-11-16'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
