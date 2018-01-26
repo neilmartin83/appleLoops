@@ -1264,7 +1264,7 @@ def main():
         '--allow-insecure',
         action='store_true',
         dest='allow_insecure',
-        help='Uses --inscure flag for curl for https.',
+        help='Uses --insecure flag for curl for https.',
         required=False
     )
 
@@ -1272,7 +1272,7 @@ def main():
         '--allow-untrusted',
         action='store_true',
         dest='allow_untrusted',
-        help='Uses the --allowUntrasted flag for installer',
+        help='Uses the --allowUntrusted flag for installer',
         required=False
     )
 
