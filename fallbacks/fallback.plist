@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>garageband1011.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/garageband1011.plist</string>
+	<key>garageband1012.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/garageband1012.plist</string>
+	<key>garageband1015.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/garageband1015.plist</string>
+	<key>garageband1016.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/garageband1016.plist</string>
+	<key>garageband1020.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/garageband1020.plist</string>
+	<key>logicpro1021.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1021.plist</string>
+	<key>logicpro1022.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1022.plist</string>
+	<key>logicpro1023.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1023.plist</string>
+	<key>logicpro1030.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1030.plist</string>
+	<key>logicpro1032.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1032.plist</string>
+	<key>logicpro1040.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/logicpro1040.plist</string>
+	<key>mainstage323.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/mainstage323.plist</string>
+	<key>mainstage324.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/mainstage324.plist</string>
+	<key>mainstage330.plist</key>
+	<string>https://raw.githubusercontent.com/carlashley/appleLoops/master/lp10_ms3_content_2016/mainstage330.plist</string>
+</dict>
+</plist>
