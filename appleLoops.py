@@ -310,7 +310,7 @@ class AppleLoops():
             # These try statements for the logging avoid exceptions when printing out the help text.  # NOQA
             try:
                 self.log.debug('Trying specified package server {} for configuration'.format(self.pkg_server))  # NOQA
-            except:
+            except Exception:
                 pass
             if self.pkg_server and self.config_url_reachable(os.path.join(self.pkg_server, self.config_file_path)):  # NOQA
                 # Test if the pkg server path is reachable
@@ -321,7 +321,7 @@ class AppleLoops():
             else:
                 try:
                     self.log.debug('Trying github server for configuration')  # NOQA
-                except:
+                except Exception:
                     pass
                 # Fail to github and test if github is reachable
                 if self.config_url_reachable(self.github_config_url):
@@ -329,11 +329,11 @@ class AppleLoops():
                     self.log.debug('Using %s for configuration url' % e)
                     config = self.request.read_data(self.config_url)
                     self.configuration = plistlib.readPlistFromString(config)  # NOQA
-        except:
+        except Exception:
             try:
                 try:
                     self.log.debug('Trying for local configuration file')
-                except:
+                except Exception:
                     pass
                 # Fail to local copy
                 self.config_url = self.config_file_path
@@ -351,7 +351,7 @@ class AppleLoops():
                 self.exit('config_read', custom_msg=self.config_url)
                 try:
                     self.log.debug('Exception: %s' % e)
-                except:
+                except Exception:
                     pass
 
         # Supported apps
@@ -418,7 +418,7 @@ class AppleLoops():
                         if self.request.response_code(self.caching_server) != 400:  # NOQA
                             self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
                             self.caching_server = False
-                    except:
+                    except Exception:
                         self.printlog('Caching server test failed, falling back to Apple servers.')  # NOQA
                         self.caching_server = False
                 else:
@@ -560,7 +560,7 @@ class AppleLoops():
                         # Test if the plist for the app can be found, if not log the app doesn't appear to be installed.  # NOQA
                         if len(glob(self.configuration['loop_feeds'][app]['app_path'])) > 0:  # NOQA
                             urls = self.plist_url(app)
-                            self.process_pkgs(self.get_feed(urls.apple, urls.fallback))  # NOQA
+                            self.process_pkgs(self.get_feed(urls.apple, urls.fallback), os.path.basename(urls.apple))  # NOQA
                         else:
                             self.printlog('Skipping %s as it does not appear to be installed.' % app)  # NOQA
                             pass
@@ -622,19 +622,19 @@ class AppleLoops():
                             for plist in self.garageband_loop_plists:
                                 apple_url = '%s%s/%s' % (self.base_url, self.garageband_loop_year, plist)  # NOQA
                                 fallback_url = '%s%s/%s' % (self.alt_base_url, self.garageband_loop_year, plist)  # NOQA
-                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url), os.path.basename(apple_url))  # NOQA
 
                         if 'logicpro' in app:
                             for plist in self.logicpro_loop_plists:
                                 apple_url = '%s%s/%s' % (self.base_url, self.logicpro_loop_year, plist)  # NOQA
                                 fallback_url = '%s%s/%s' % (self.alt_base_url, self.logicpro_loop_year, plist)  # NOQA
-                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url), os.path.basename(apple_url))  # NOQA
 
                         if 'mainstage' in app:
                             for plist in self.mainstage_loop_plists:
                                 apple_url = '%s%s/%s' % (self.base_url, self.mainstage_loop_year, plist)  # NOQA
                                 fallback_url = '%s%s/%s' % (self.alt_base_url, self.mainstage_loop_year, plist)  # NOQA
-                                self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+                                self.process_pkgs(self.get_feed(apple_url, fallback_url), os.path.basename(apple_url))  # NOQA
             else:
                 self.exit('plist_deployment_combo')
 
@@ -646,7 +646,7 @@ class AppleLoops():
                     app_year = self.configuration['loop_feeds'][app]['loop_year']  # NOQA
                     apple_url = '%s%s/%s' % (self.base_url, app_year, plist)
                     fallback_url = '%s%s/%s' % (self.alt_base_url, app_year, plist)  # NOQA
-                    self.process_pkgs(self.get_feed(apple_url, fallback_url))  # NOQA
+                    self.process_pkgs(self.get_feed(apple_url, fallback_url), os.path.basename(apple_url))  # NOQA
             else:
                 self.exit('apps_deployment_combo')
 
@@ -708,7 +708,7 @@ class AppleLoops():
             self.log.info('There was a problem trying to reach %s' % apple_url)  # NOQA
             return Exception('There was a problem trying to reach %s' % apple_url)  # NOQA
 
-    def process_pkgs(self, app_feed_dict):
+    def process_pkgs(self, app_feed_dict, app_feed_filename):
         # Specific part of the app_feed_dict to process
         loops = []
         packages = app_feed_dict['result']['Packages']
@@ -761,21 +761,21 @@ class AppleLoops():
             # Mandatory or optional
             try:
                 _pkg_mandatory = packages[pkg]['IsMandatory']
-            except:
+            except Exception:
                 _pkg_mandatory = False
 
             # Package size
             try:
                 # Use int type to avoid exception errors.
                 _pkg_size = int(self.request.get_headers(_pkg_url)['content-length'])  # NOQA
-            except:
+            except Exception:
                 _pkg_size = None
 
             # Installed size in bytes
             try:
                 # Use int type to avoid exception errors.
                 _pkg_install_size = int(packages[pkg]['InstalledSize'])
-            except:
+            except Exception:
                 _pkg_install_size = None
 
             # Some package ID's seem to have a '. ' in them which is a typo.
@@ -803,7 +803,7 @@ class AppleLoops():
                 try:
                     # Apple uses long type, but need to make it a number then a string to compare with Loose/StrictVersion()  # NOQA
                     _pkg_remote_ver = str(float(packages[pkg]['PackageVersion']))  # NOQA
-                except:
+                except Exception:
                     _pkg_remote_ver = '0.0.0'
             else:
                 # Don't need to worry about pkg versions if not installed.
@@ -816,12 +816,12 @@ class AppleLoops():
                 if LooseVersion(_pkg_local_ver) < LooseVersion(_pkg_remote_ver):  # NOQA
                     self.log.info('%s needs upgrading (based on LooseVersion())' % _pkg_name)  # NOQA
                     _pkg_installed = False
-            except:
+            except Exception:
                 try:
                     if StrictVersion(_pkg_local_ver) < StrictVersion(_pkg_remote_ver):  # NOQA
                         self.log.info('%s needs upgrading (based on StrictVersion())' % _pkg_name)  # NOQA
                         _pkg_installed = False
-                except:
+                except Exception:
                     # Presume pkg not installed if both version tests fail
                     _pkg_installed = False
                     _pkg_local_ver = '0.0.0'
@@ -860,10 +860,29 @@ class AppleLoops():
             )
 
             if loop not in loops:
-                # Appending to a list allows the free disk space/threshold
-                # checks to work
-                loops.append(loop)
-                self.log.debug(loop)
+                # After GarageBand 10.3+ release, there's a bunch of loops that are downloaded but don't install due to not finding a qualifying package for mainstage and logicpro
+                garageband1021_failures = [
+                    'JamPack1.pkg',
+                    'JamPack4_Instruments.pkg',
+                    'MAContent10_AppleLoopsLegacy1.pkg',
+                    'MAContent10_AppleLoopsLegacyRemix.pkg',
+                    'MAContent10_AppleLoopsLegacyRhythm.pkg',
+                    'MAContent10_AppleLoopsLegacySymphony.pkg',
+                    'MAContent10_AppleLoopsLegacyVoices.pkg',
+                    'MAContent10_AppleLoopsLegacyWorld.pkg',
+                    'MAContent10_GarageBand6Legacy.pkg',
+                    'MAContent10_IRsSurround.pkg',
+                    'MAContent10_Logic9Legacy.pkg',
+                    'RemixTools_Instruments.pkg',
+                    'RhythmSection_Instruments.pkg',
+                    'Voices_Instruments.pkg',
+                    'WorldMusic_Instruments.pkg',
+                ]
+                # Appending to a list allows the free disk space/threshold checks to work
+                # Also includes check to see if _pkg_name is not one of the packages that gets downloaded for GarageBand 10.3+ that can't install because reasons.
+                if app_feed_filename not in ['garageband1021.plist'] and _pkg_name not in garageband1021_failures:
+                    loops.append(loop)
+                    self.log.debug(loop)
 
         # Internal method to check if download/download+install takes place
         def download_or_install(loop_pkg):
@@ -937,7 +956,7 @@ class AppleLoops():
         if result:
             try:
                 ver = plistlib.readPlistFromString(result)['pkg-version']
-            except:
+            except Exception:
                 # If the plist can't be read, or throws an exception, the package is probably not installed.  # NOQA
                 ver = '0.0.0'
 
@@ -976,7 +995,7 @@ class AppleLoops():
                 # Test if there is a duplicate. This also copies duplicates.
             try:
                 self.duplicate_file_exists(pkg)
-            except:  # Exception as e:
+            except Exception:  # Exception as e:
                 # Log if the pkg url has fallen back direct to Apple in circumstances  # NOQA
                 if (self.pkg_server and 'audiocontentdownload.apple.com' in pkg.pkg_url) or (self.caching_server and '?source=' not in pkg.pkg_url):  # NOQA
                     self.log.info('Falling back to Apple server for %s download' % pkg.pkg_name)  # NOQA
@@ -1030,7 +1049,7 @@ class AppleLoops():
             suffix_index = 0
             while file_size > 1024 and suffix_index < 4:
                 suffix_index += 1
-                file_size = file_size/1024.0
+                file_size = file_size / 1024.0
 
             return '%.*f %s' % (precision, file_size, suffixes[suffix_index])  # NOQA
         except Exception:
@@ -1164,6 +1183,9 @@ class AppleLoops():
                         os.remove(pkg.pkg_destination)
                     except Exception as e:
                         self.exit('general_exception', custom_msg=e)
+                elif 'qualifying copy' in result:
+                    self.printlog('  Qualifying copy of an app not found for %s - %s' % (pkg.pkg_name, result.replace('\n', ' ')))
+                    failed_install(pkg)
                 else:
                     self.log.debug('Install does not appear to be successful: %s' % result)  # NOQA
                     failed_install(pkg)
@@ -1202,7 +1224,7 @@ class AppleLoops():
                         self.printlog('Building %s' % dmg_filename)
                         os.remove(dmg_filename)
                         subprocess.check_call(cmd)
-                    except:
+                    except Exception:
                         self.exit('remove_dmg', custom_msg=dmg_filename)
                 else:
                     self.exit('dmg_file_exists', custom_msg=dmg_filename)
