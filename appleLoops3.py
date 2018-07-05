@@ -25,30 +25,30 @@ Requirements:
 '''
 
 # Imports for general use
-import argparse
-import logging
-import os
-import plistlib
-import sys
-import shutil
-import ssl
-import subprocess
-import traceback
-import urllib2
+# pylint: disable=W0611
+import argparse  # NOQA
+import logging  # NOQA
+import os  # NOQA
+import plistlib  # NOQA
+import sys  # NOQA
+import shutil  # NOQA
+import ssl  # NOQA
+import subprocess  # NOQA
+import urllib2  # NOQA
 
-from collections import namedtuple
-from distutils.version import LooseVersion, StrictVersion
-from glob import glob
-from logging.handlers import RotatingFileHandler
-from urlparse import urlparse
+from collections import namedtuple  # NOQA
+from distutils.version import LooseVersion, StrictVersion  # NOQA
+from glob import glob  # NOQA
+from logging.handlers import RotatingFileHandler  # NOQA
+from urlparse import urlparse  # NOQA
 
 # Imports specifically for FoundationPlist
 # PyLint cannot properly find names inside Cocoa libraries, so issues bogus
 # No name 'Foo' in module 'Bar' warnings. Disable them.
 # pylint: disable=E0611
 from Foundation import NSData  # NOQA
-from Foundation import NSPropertyListSerialization
-from Foundation import NSPropertyListMutableContainers
+from Foundation import NSPropertyListSerialization  # NOQA
+from Foundation import NSPropertyListMutableContainers  # NOQA
 from Foundation import NSPropertyListXMLFormat_v1_0  # NOQA
 # pylint: enable=E0611
 
@@ -214,15 +214,24 @@ class AppleLoops():
         self.log.debug(vars(AppleLoops))
         self.log.debug(self.__dict__)
 
-        # Apple URL, Mirror URL, and Cache URL
+        # Audio Content: Apple URL, Mirror URL, and Cache URL
         class AudioContentSource(object):
             def __init__(self, mirror=None, cache=None):
-                self.apple = 'http://audiocontentdownload.apple.com'
-                self.mirror = mirror
+                self.apple = 'http://audiocontentdownload.apple.com'  # This is the fall back in case there is no hosted mirror, or cache server is not supplied.
                 self.cache = cache
+                self.mirror = mirror  # This is the preferred means of deploying loops
 
         self.content_source = AudioContentSource(mirror=self.pkg_server, cache=self.caching_server)
         self.log.debug('Apple Source URL: {}, Mirror Source URL: {}, Caching Server Source URL: {}'.format(self.content_source.apple, self.content_source.mirror, self.content_source.cache))
+
+        # Plist Content: Apple URL, Mirror URL, and GitHub URL
+        class PlistContentSource(object):
+            def __init__(self, mirror=None):
+                self.apple = 'http://audiocontentdownload.apple.com/lp10_ms3_content_2016'  # This is second resort after the local installed app copy fails
+                self.github = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content_2016'  # This is last resort
+
+        self.plist_content_source = PlistContentSource()
+        self.log.debug('Apple Plist Source URL: {}, GitHub Mirror Source Plist URL: {}'.format(self.plist_content_source.apple, self.plist_content_source.github))
 
         # Basic App Details
         class GarageBand(object):
@@ -278,7 +287,7 @@ class AppleLoops():
 
 
 def main():
-    appleloops = AppleLoops(debug=True)
+    appleloops = AppleLoops(debug=True)  # NOQA
 
 
 if __name__ == '__main__':
