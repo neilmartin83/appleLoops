@@ -163,7 +163,7 @@ class Requests():
 
 
 class AppleLoops():
-    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, debug_concurrency=False, deployment_mode=False, destination='/tmp', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
+    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
 
         # Logging
         if log_path:  # Log path will vary depending on context of who is using it, and what mode.
@@ -179,8 +179,6 @@ class AppleLoops():
         self.log = logging.getLogger('appleLoops')
         # Debug is either True/False, but defaults to False
         self.debug = debug
-        # Concurrency debug is either True/False, defaults to False. Used to switch to a standard for lop for iterating over URL details when processing a plist.
-        self.debug_concurrency = debug_concurrency
         # Set log level based on debug mode.
         if self.debug:
             self.log.setLevel(logging.DEBUG)
@@ -204,9 +202,9 @@ class AppleLoops():
         self.create_links_only = create_links_only  # Only outputs links of the audio content so third party download tools can be used. Defaults to False.
         self.deployment_mode = deployment_mode  # If True, will install packages. Defaults to False. Must run as user with permissions to install pkgs, typically root.
         if not self.deployment_mode:
-            self.destination = destination  # The path that content will be downloaded to. Defaults to '/tmp'. Deployment mode will always use '/tmp'.
+            self.destination = destination  # The path that content will be downloaded to. Defaults to '/tmp/appleloops'. Deployment mode will always use '/tmp/appleloops'.
         elif self.deployment_mode:
-            self.destination = '/tmp'
+            self.destination = '/tmp/appleloops'
         self.dmg_filename = dmg_filename  # Filename used for creating DMG of content
         self.dry_run = dry_run  # Provides output only of what would happen. Defaults to True.
         self.force_deploy = force_deploy  # Re-installs packages regardless of whether they have been installed or not. Defaults to False.
@@ -284,8 +282,9 @@ class AppleLoops():
             bad_packages = {
                 'garageband1021.plist': ['JamPack4_Instruments.pkg', 'MAContent10_AppleLoopsLegacy1.pkg', 'MAContent10_AppleLoopsLegacyRemix.pkg', 'MAContent10_AppleLoopsLegacyRhythm.pkg', 'MAContent10_AppleLoopsLegacySymphony.pkg', 'MAContent10_AppleLoopsLegacyVoices.pkg', 'MAContent10_AppleLoopsLegacyWorld.pkg', 'MAContent10_AssetPack_0326_AppleLoopsJamPack1.pkg', 'MAContent10_GarageBand6Legacy.pkg', 'MAContent10_IRsSurround.pkg', 'MAContent10_Logic9Legacy.pkg', 'RemixTools_Instruments.pkg', 'RhythmSection_Instruments.pkg', 'Voices_Instruments.pkg', 'WorldMusic_Instruments.pkg'],
             }
-            self.log.debug('Bad package check: {}'.format(package))
-            return package in bad_packages[plist]
+            if package in bad_packages[plist]:
+                self.log.debug('Bad package check: {}'.format(package))
+                return package in bad_packages[plist]
 
         # An internal function to transform the Apple URL into a Cache Server friendly URL.
         def transformCacheServerURL(url):
@@ -323,19 +322,25 @@ class AppleLoops():
             '''Returns a dictionary of installed state and version.'''
             # Default dict values to return
             installed_result = {'installed': False, 'version': '0.0'}
+            self.log.debug('System is {}'.format(sys.platform))
             if 'darwin' in sys.platform:
                 pkgutil = ['/usr/sbin/pkgutil', '--pkg-info-plist', package_id]
                 result, error = subprocess.Popen(pkgutil, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
                 if result:
                     installed_result['installed'], installed_result['version'] = True, '.'.join(str(readPlistFromString(result)['pkg-version']).split('.')[:3])  # Local version is awful version type to compare, example: 2.0.0.0.1.1447702152
+                if error:
+                    self.log.debug('Error checking if package is installed: {}'.format(error))
+                    raise Exception(error)
 
             return installed_result
 
         # If the plist path starts with 'http', fetch from the provided URL and read direct from string, otherwise assume local path
         if plist.startswith('http'):
             packages = readPlistFromString(self.requests.fetch(plist))['Packages']
+            self.log.debug('Fetched {}'.format(plist))
         else:
             packages = readPlist(plist)['Packages']
+            self.log.debug('Read {}'.format(plist))
 
         # Iterate over the resulting packages dictionary and start getting values for dropping into a dict.
         for package in packages:
@@ -387,22 +392,25 @@ class AppleLoops():
                     'PackageLocalVersion': package_local_version,
                     'PackageInstalled': package_installed,
                 }
+                self.log.debug(self.packages_to_process[package_basename])
 
         # Concurrency for faster processing of URL's
-        if not self.debug_concurrency:
-            workers = 20
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                future_to_package = {executor.submit(updatePackageDetails, package): package for package in self.packages_to_process}
-                for future in concurrent.futures.as_completed(future_to_package):
-                    package = future_to_package[future]
-                    try:
-                        future.result()
-                    except Exception as exception:
-                        raise exception
-
-        if self.debug_concurrency:
-            for package in self.packages_to_process:
-                updatePackageDetails(package)
+        self.log.debug('Beginning concurrency run with updatePackageDetails()')
+        workers = 20
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_package = {executor.submit(updatePackageDetails, package): package for package in self.packages_to_process}
+            for future in concurrent.futures.as_completed(future_to_package):
+                package = future_to_package[future]
+                try:
+                    future.result()
+                except Exception as exception:
+                    self.log.debug('Concurrency exception: {}'.format(exception))
+                    print 'Exception occurred while concurrency processing underway, please be patient while debugging occurs.'
+                    print 'Issues can be raised by visiting http://github.com/carlashley/appleloops/issues. Please include the exception error and the log file {}.'.format(self.log_file)
+                    # Start a normal for loop to debug what happened while processing the package details.
+                    self.log.debug('Beginning for loop iteration over self.packages_to_process to debug concurrency exception')
+                    for package in self.packages_to_process:
+                        updatePackageDetails(package)
 
         pprint(self.packages_to_process)
 
@@ -451,7 +459,7 @@ def main():
         else:
             _apps = None
 
-        #    AppleLoops() arguments: allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5
+        #    AppleLoops() arguments: allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5
         # appleloops = AppleLoops(debug=True, apps=_apps, mirror_source_paths=False)  # NOQA
         appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/')  # NOQA
         # appleloops = AppleLoops(debug=True, apps=_apps, caching_server='http://example.org:8080')  # NOQA
