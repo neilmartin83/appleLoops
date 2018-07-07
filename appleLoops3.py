@@ -163,7 +163,15 @@ class Requests():
 
 
 class AppleLoops():
-    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
+    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link_files=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, http_proxy=None, https_proxy=None, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
+
+        if http_proxy:
+            self.http_proxy = http_proxy
+            os.environ['HTTP_PROXY'], os.environ['http_proxy'] = self.http_proxy, self.http_proxy
+
+        if https_proxy:
+            self.https_proxy = https_proxy
+            os.environ['HTTPS_PROXY'], os.environ['https_proxy'] = self.https_proxy, self.https_proxy
 
         # Supported apps are
         self.supported_apps = ['garageband', 'logicpro', 'mainstage']
@@ -488,11 +496,18 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=SaneUsageFormat)
     supported_plist_exclusive_group = parser.add_mutually_exclusive_group()
 
+    # Can't mix with --plist, --supported-plists
     supported_plist_exclusive_group.add_argument('--apps', type=str, nargs='+', dest='apps', metavar='<app>', help='Processes packages available for the specified app.', choices=['garageband', 'logicpro', 'mainstage'], required=False)
 
-    parser.add_argument('--plist', type=str, nargs='+', dest='plists', metavar='<plist>', help='Processes packages based on the provided plist(s).', required=False)
+    # Can't mix with --apps, --supported-plists
+    supported_plist_exclusive_group.add_argument('--plist', type=str, nargs='+', dest='plists', metavar='<plist>', help='Processes packages based on the provided plist(s).', required=False)
 
+    # Can't mix with --apps, --plist
     supported_plist_exclusive_group.add_argument('--supported-plists', action='store_true', dest='show_supported_plists', help='Retrieves a list of supported plists direct from Apple\'s servers', required=False)
+
+    # Arguments that can mix together belong here.
+    parser.add_argument('--http-proxy', type=str, nargs=1, dest='http_proxy', metavar='<http proxy>', help='Specify the http proxy for your network: http://<user>:<pass>@example.org:8080', required=False)
+    parser.add_argument('--https-proxy', type=str, nargs=1, dest='https_proxy', metavar='<https proxy>', help='Specify the https proxy for your network: https://<user>:<pass>@example.org:8080', required=False)
 
     # Parse the args
     args = parser.parse_args()
@@ -519,9 +534,19 @@ def main():
         else:
             _apps = None
 
-        #    AppleLoops() arguments: allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5
+        if len(args.http_proxy) == 1:
+            _http_proxy = args.http_proxy[0]
+        else:
+            _http_proxy = None
+
+        if len(args.https_proxy) == 1:
+            _https_proxy = args.https_proxy[0]
+        else:
+            _https_proxy = None
+
+        # appleloops = AppleLoops(allow_insecure_https=_allow_insecure_https, allow_untrusted_pkgs=_allow_untrusted_pkgs, apps=_apps, apps_plist=_apps_plist, caching_server=_caching_server, create_links_only=_create_links_only, debug=_debug, deployment_mode=_deployment_mode, destination=_destination, dmg_filename=_dmg_filename, dry_run=_dry_run, force_deploy=_force_deploy, force_dmg=_force_dmg, hard_link_files=_hard_link, log_path=_log_path, mandatory_pkgs=_mandatory, mirror_source_paths=_mirror_source_paths, http_proxy=_http_proxy, https_proxy=_https_proxy, quiet_download=_quiet_download, optional_pkgs=_optional_pkgs, pkg_server=_pkg_server, quiet_mode=_quiet_mode, space_threshold=_space_threshold)
         # appleloops = AppleLoops(debug=True, apps=_apps, mirror_source_paths=False)  # NOQA
-        appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/')  # NOQA
+        appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/', http_proxy=_http_proxy, https_proxy=_https_proxy)  # NOQA
         # appleloops = AppleLoops(debug=True, apps=_apps, caching_server='http://example.org:8080')  # NOQA
         appleloops.processPlist(appleloops.garageband.apple_plist_source)
 
