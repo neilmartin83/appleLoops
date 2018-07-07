@@ -165,6 +165,8 @@ class Requests():
 class AppleLoops():
     def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
 
+        # Supported apps are
+        self.supported_apps = ['garageband', 'logicpro', 'mainstage']
         # Logging
         if log_path:  # Log path will vary depending on context of who is using it, and what mode.
             self.log_path = log_path  # Specifying a log path will override default locations.
@@ -234,7 +236,7 @@ class AppleLoops():
             def __init__(self, mirror=None, cache=None):
                 self.apple = 'http://audiocontentdownload.apple.com'  # This is the fall back in case there is no hosted mirror, or cache server is not supplied.
                 self.cache = cache  # For caching server, don't transform here.
-                self.github = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content/2016'  # Backup location for plists only. Do not use for pkg files.
+                self.github = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content_2016'  # Backup location for plists only. Do not use for pkg files.
                 self.mirror = mirror  # This is the preferred means of deploying loops
 
         self.content_source = AudioContentSource(mirror=self.pkg_server, cache=self.caching_server)
@@ -330,7 +332,6 @@ class AppleLoops():
                     installed_result['installed'], installed_result['version'] = True, '.'.join(str(readPlistFromString(result)['pkg-version']).split('.')[:3])  # Local version is awful version type to compare, example: 2.0.0.0.1.1447702152
                 if error:
                     self.log.debug('Error checking if package is installed: {}'.format(error))
-                    raise Exception(error)
 
             return installed_result
 
@@ -409,10 +410,10 @@ class AppleLoops():
                     print 'Issues can be raised by visiting http://github.com/carlashley/appleloops/issues. Please include the exception error and the log file {}.'.format(self.log_file)
                     # Start a normal for loop to debug what happened while processing the package details.
                     self.log.debug('Beginning for loop iteration over self.packages_to_process to debug concurrency exception')
-                    for package in self.packages_to_process:
-                        updatePackageDetails(package)
+                    for _package in self.packages_to_process:
+                        updatePackageDetails(_package)
 
-        pprint(self.packages_to_process)
+        # pprint(self.packages_to_process)
 
 
 def main():
@@ -444,16 +445,75 @@ def main():
         def _get_default_metavar_for_optional(self, action):
             return action.dest.upper()
 
+    def getSupportedPlists():
+        '''Returns a list of valid plists that can be used to download Apple\'s audio content'''
+        '''This can take a few moments to process.'''
+        supported_apps = ['garageband', 'logicpro', 'mainstage']
+        valid_plist_urls = []  # Empty list for all the valid plists to go into
+
+        def supportedPlists():
+            base_plist_url = 'http://audiocontentdownload.apple.com/lp10_ms3_content_2016'
+            urls_to_check = []
+            for app in supported_apps:
+                if 'garageband' in app:
+                    version_range = range(1011, 1099)
+                    [urls_to_check.append('{}/{}{}.plist'.format(base_plist_url, app, x)) for x in version_range if '{}/{}{}.plist'.format(base_plist_url, app, x) not in urls_to_check]
+                if 'logicpro' in app:
+                    version_range = range(1021, 1099)
+                    [urls_to_check.append('{}/{}{}.plist'.format(base_plist_url, app, x)) for x in version_range if '{}/{}{}.plist'.format(base_plist_url, app, x) not in urls_to_check]
+                if 'mainstage' in app:
+                    version_range = range(323, 399)
+                    [urls_to_check.append('{}/{}{}.plist'.format(base_plist_url, app, x)) for x in version_range if '{}/{}{}.plist'.format(base_plist_url, app, x) not in urls_to_check]
+            return urls_to_check
+
+        def checkSupportedPlistURL(plist_url):
+            requests = Requests()
+            if requests.status(url=plist_url) == 200 and plist_url not in valid_plist_urls:
+                valid_plist_urls.append(os.path.basename(plist_url))
+
+        # Populates the self.valid_plist_urls list that is used to identify what plists can be processed by this script.
+        workers = 200  # 200 workers seems enough to get this job done quick enough, if this locks up your system, drop it back down to double digits.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_url = {executor.submit(checkSupportedPlistURL, url): url for url in supportedPlists()}
+            for future in concurrent.futures.as_completed(future_to_url):
+                # url = future_to_url[future]
+                try:
+                    future.result()
+                except Exception as exception:
+                    raise exception
+
+        return valid_plist_urls
+
+    # Now build the arguments
     parser = argparse.ArgumentParser(formatter_class=SaneUsageFormat)
+    supported_plist_exclusive_group = parser.add_mutually_exclusive_group()
 
-    parser.add_argument('--apps', type=str, nargs='+', dest='apps', metavar='<app>', help='Processes packages available for the specified app.', choices=['garageband', 'logicpro', 'mainstage'], required=False)
+    supported_plist_exclusive_group.add_argument('--apps', type=str, nargs='+', dest='apps', metavar='<app>', help='Processes packages available for the specified app.', choices=['garageband', 'logicpro', 'mainstage'], required=False)
 
+    parser.add_argument('--plist', type=str, nargs='+', dest='plists', metavar='<plist>', help='Processes packages based on the provided plist(s).', required=False)
+
+    supported_plist_exclusive_group.add_argument('--supported-plists', action='store_true', dest='show_supported_plists', help='Retrieves a list of supported plists direct from Apple\'s servers', required=False)
+
+    # Parse the args
     args = parser.parse_args()
 
+    # Deal with the arguments
     if not len(sys.argv) > 1:
         parser.print_help()
         sys.exit(0)
     elif len(sys.argv) > 1:
+        if args.show_supported_plists:
+            print 'Determining supported plist files from Apple servers. This may take a few moments.'
+            plists = getSupportedPlists()
+            gb = [x for x in plists if x.startswith('garageband')]
+            print 'GarageBand: {}'.format(', '.join(gb))
+            lp = [x for x in plists if x.startswith('logicpro')]
+            print 'Logic Pro X: {}'.format(', '.join(lp))
+            ms = [x for x in plists if x.startswith('mainstage')]
+            print 'MainStage 3: {}'.format(', '.join(ms))
+
+            sys.exit(0)
+
         if len(args.apps) > 1:
             _apps = args.apps
         else:
