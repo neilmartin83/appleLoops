@@ -27,6 +27,7 @@ Requirements:
 # Imports for general use
 # pylint: disable=W0611
 import argparse  # NOQA
+import concurrent.futures  # NOQA
 import logging  # NOQA
 import os  # NOQA
 import plistlib  # NOQA
@@ -40,6 +41,7 @@ from collections import namedtuple  # NOQA
 from distutils.version import LooseVersion, StrictVersion  # NOQA
 from glob import glob  # NOQA
 from logging.handlers import RotatingFileHandler  # NOQA
+from pprint import pprint  # NOQA
 from urlparse import urlparse  # NOQA
 
 # Imports specifically for FoundationPlist
@@ -127,7 +129,8 @@ class Requests():
         self.allow_insecure = allow_insecure
         self.timeout = 5
 
-    def response_code(self, url):
+    def status(self, url):
+        '''Return the status code of the HTTP request'''
         try:
             if self.allow_insecure:
                 return urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).getcode()  # NOQA
@@ -138,7 +141,8 @@ class Requests():
         except urllib2.URLError as e:
             return e
 
-    def get_headers(self, url):
+    def headers(self, url):
+        '''Return the headers of the requested URL'''
         try:
             if self.allow_insecure:
                 return dict(urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).info())  # NOQA
@@ -147,7 +151,8 @@ class Requests():
         except Exception as e:
             return e
 
-    def read_data(self, url):
+    def fetch(self, url):
+        '''Return the complete response from the HTTP request'''
         try:
             if self.allow_insecure:
                 return urllib2.urlopen(url, timeout=self.timeout, context=ssl._create_unverified_context()).read()  # NOQA
@@ -158,7 +163,7 @@ class Requests():
 
 
 class AppleLoops():
-    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
+    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, debug_concurrency=False, deployment_mode=False, destination='/tmp', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
 
         # Logging
         if log_path:  # Log path will vary depending on context of who is using it, and what mode.
@@ -174,6 +179,8 @@ class AppleLoops():
         self.log = logging.getLogger('appleLoops')
         # Debug is either True/False, but defaults to False
         self.debug = debug
+        # Concurrency debug is either True/False, defaults to False. Used to switch to a standard for lop for iterating over URL details when processing a plist.
+        self.debug_concurrency = debug_concurrency
         # Set log level based on debug mode.
         if self.debug:
             self.log.setLevel(logging.DEBUG)
@@ -190,7 +197,10 @@ class AppleLoops():
         self.allow_untrusted_pkgs = allow_untrusted_pkgs  # When deploying apps, use this to ignore certificate errors when packages are installed
         self.apps = apps  # A list of apps to do things with. Supported values are ['all', 'garageband', 'logicpro', 'mainstage']
         self.apps_plist = apps_plist  # A list of specific plists to do things with, i.e. ['garageband1021.plist', 'logicpro1040.plist']
-        self.caching_server = caching_server  # A caching server to use, must be in format of 'http://example.org:port' or 'http://10.0.0.1:port'
+        if caching_server:  # So .rstrip() can work, have to check if caching_server has a value.
+            self.caching_server = caching_server.rstrip('/')  # A caching server to use, must be in format of 'http://example.org:port' or 'http://10.0.0.1:port'
+        else:
+            self.caching_server = caching_server
         self.create_links_only = create_links_only  # Only outputs links of the audio content so third party download tools can be used. Defaults to False.
         self.deployment_mode = deployment_mode  # If True, will install packages. Defaults to False. Must run as user with permissions to install pkgs, typically root.
         if not self.deployment_mode:
@@ -206,88 +216,246 @@ class AppleLoops():
         self.mirror_source_paths = mirror_source_paths  # This will mirror the folder structure of the Apple audiocontent.apple.com servers. Defaults to True. This is a change from previous behaviour.
         self.quiet_download = quiet_download  # This will suppress the progress bar while downloading files. Default is False.
         self.optional_pkgs = optional_pkgs  # Sets the flag to download/install the optional packages for a given app. Defaults to False.
-        self.pkg_server = pkg_server  # Uses the specified local mirror of packages, must be in format of 'http://example.org/path/to/content'. Defaults to None. Removes any extraneous '/' char from end of argument value.
+        if pkg_server:  # So .rstrip() can work, have to check if pkg_server has a value.
+            self.pkg_server = pkg_server.rstrip('/')  # Uses the specified local mirror of packages, must be in format of 'http://example.org/path/to/content'. Defaults to None. Removes any extraneous '/' char from end of argument value.
+        else:
+            self.pkg_server = pkg_server
         self.quiet_mode = quiet_mode  # Suppresses all stdout/stderr output. To view info about a run, view the log file. Defaults to False.
         self.space_threshold = space_threshold  # The percentage of disk free space to protect. Defaults to 5%. Must be an integer.
-
+        # Create an instance of Requests()
+        self.requests = Requests(allow_insecure=self.allow_insecure_https)
         # Debug log the class and what it was initialised with
         self.log.debug(vars(AppleLoops))
         self.log.debug(self.__dict__)
+        # Create an empty dict to store loops that need to be process
+        self.packages_to_process = {}
 
         # Audio Content: Apple URL, Mirror URL, and Cache URL
         class AudioContentSource(object):
+            '''Simple object that returns three attributes about audio content source.'''
             def __init__(self, mirror=None, cache=None):
                 self.apple = 'http://audiocontentdownload.apple.com'  # This is the fall back in case there is no hosted mirror, or cache server is not supplied.
-                self.cache = cache
+                self.cache = cache  # For caching server, don't transform here.
+                self.github = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content/2016'  # Backup location for plists only. Do not use for pkg files.
                 self.mirror = mirror  # This is the preferred means of deploying loops
 
         self.content_source = AudioContentSource(mirror=self.pkg_server, cache=self.caching_server)
         self.log.debug('Apple Source URL: {}, Mirror Source URL: {}, Caching Server Source URL: {}'.format(self.content_source.apple, self.content_source.mirror, self.content_source.cache))
 
-        # Plist Content: Apple URL, Mirror URL, and GitHub URL
-        class PlistContentSource(object):
-            def __init__(self, mirror=None):
-                self.apple = 'http://audiocontentdownload.apple.com/lp10_ms3_content_2016'  # This is second resort after the local installed app copy fails
-                self.github = 'https://raw.githubusercontent.com/carlashley/appleLoops/test/lp10_ms3_content_2016'  # This is last resort
+        def processLocalApp(application):
+            '''Internal function that Returns information about specified application if the application path exists'''
+            app_paths = {'garageband': 'GarageBand.app', 'logicpro': 'Logix Pro X.app', 'mainstage': 'MainStage 3.app'}
+            if application not in app_paths.keys():
+                raise Exception('Invalid application name. Choose from {}'.format(app_paths.keys()))
+            Result = namedtuple('Result', ['installed', 'path', 'plist', 'plist_basename', 'apple_plist_source', 'github_plist_source'])
+            app_result = {}  # An empty dict to make it easier to return None values if that is the result
+            app_path = os.path.join('/Applications', app_paths[application])
+            plist_glob = os.path.join(app_path, 'Contents/Resources/{}*.plist'.format(application))
+            app_result['installed'] = os.path.exists(app_path)
 
-        self.plist_content_source = PlistContentSource()
-        self.log.debug('Apple Plist Source URL: {}, GitHub Mirror Source Plist URL: {}'.format(self.plist_content_source.apple, self.plist_content_source.github))
+            if os.path.exists(app_path):
+                plist_path = glob(plist_glob)  # Find relevant plists for source
+                plist_path.sort()  # Sort so if more than one exists, the last element should be the most recent plist file
+                app_result['plist_path'] = plist_path[-1]  # Return the most recent plist from the sorted list.
+                app_result['plist_basename'] = os.path.basename(plist_path[-1])
+                app_result['apple_plist_source'] = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, os.path.basename(plist_path[-1]))
+                app_result['github_plist_source'] = '{}/{}'.format(self.content_source.github, os.path.basename(plist_path[-1]))
 
-        # Basic App Details
-        class GarageBand(object):
-            def __init__(self):
-                self.app_path = '/Applications/GarageBand.app'
-                self.app_installed = os.path.exists(self.app_path)
-                if self.app_installed:
-                    self.app_plist = glob('{}/Contents/Resources/garageband*.plist'.format(self.app_path))
-                    self.app_plist.sort()
-                    self.app_plist = self.app_plist[-1]  # Make sure this returns the latest plist if more than one exists.
-                    self.app_plist_basename = os.path.basename(self.app_plist)
-                else:
-                    self.app_plist = None
+            return Result(
+                installed=app_result.get('installed', False),
+                path=app_path, plist=app_result.get('plist_path', None),
+                plist_basename=app_result.get('plist_basename', None),
+                apple_plist_source=app_result.get('apple_plist_source', None),
+                github_plist_source=app_result.get('github_plist_source', None))
 
-        self.garageband = GarageBand()
-        self.log.debug('GarageBand().app_path: {}, GarageBand().app_plist: {}, GarageBand().app_installed: {}'.format(self.garageband.app_path, self.garageband.app_plist, self.garageband.app_installed))
+        # Create the info for each local app identifying if installed, plist path, etc
+        self.garageband = processLocalApp(application='garageband')
+        self.log.debug('GarageBand: {}'.format(self.garageband))
+        self.logicpro = processLocalApp(application='logicpro')
+        self.log.debug('Logic Pro X: {}'.format(self.logicpro))
+        self.mainstage = processLocalApp(application='mainstage')
+        self.log.debug('MainStage 3: {}'.format(self.mainstage))
 
-        class LogicProX(object):
-            def __init__(self):
-                self.app_path = '/Applications/Logic Pro X.app'
-                self.app_installed = os.path.exists(self.app_path)
-                if self.app_installed:
-                    self.app_plist = glob('{}/Contents/Resources/logicpro*.plist'.format(self.app_path))
-                    self.app_plist.sort()
-                    self.app_plist = self.app_plist[-1]  # Make sure this returns the latest plist if more than one exists.
-                    self.app_plist_basename = os.path.basename(self.app_plist)
-                else:
-                    self.app_plist = None
+    def processPlist(self, plist):
+        '''Processes a plist and returns data in the form of a dictionary.'''
+        def badPackage(plist, package):
+            '''Returns True if a package should not be downloaded for whatever reason.'''
+            # After GarageBand 10.3+ release, there's a bunch of loops that are downloaded but don't install due to not finding a qualifying package for mainstage and logicpro
+            bad_packages = {
+                'garageband1021.plist': ['JamPack4_Instruments.pkg', 'MAContent10_AppleLoopsLegacy1.pkg', 'MAContent10_AppleLoopsLegacyRemix.pkg', 'MAContent10_AppleLoopsLegacyRhythm.pkg', 'MAContent10_AppleLoopsLegacySymphony.pkg', 'MAContent10_AppleLoopsLegacyVoices.pkg', 'MAContent10_AppleLoopsLegacyWorld.pkg', 'MAContent10_AssetPack_0326_AppleLoopsJamPack1.pkg', 'MAContent10_GarageBand6Legacy.pkg', 'MAContent10_IRsSurround.pkg', 'MAContent10_Logic9Legacy.pkg', 'RemixTools_Instruments.pkg', 'RhythmSection_Instruments.pkg', 'Voices_Instruments.pkg', 'WorldMusic_Instruments.pkg'],
+            }
+            self.log.debug('Bad package check: {}'.format(package))
+            return package in bad_packages[plist]
 
-        self.logicpro = LogicProX()
-        self.log.debug('LogicProX().app_path: {}, LogicProX().app_plist: {}, LogicProX().app_installed: {}'.format(self.logicpro.app_path, self.logicpro.app_plist, self.logicpro.app_installed))
+        # An internal function to transform the Apple URL into a Cache Server friendly URL.
+        def transformCacheServerURL(url):
+            '''Transforms a given URL into a URL that will pull through the Caching Server on the network'''
+            if not url.startswith(self.content_source.apple):  # For caching, the source URL has to be the audiocontentdownload url.
+                err_msg = 'Package URL must start with {}'.format(self.content_source.apple)
+                self.log.debug(err_msg)
+                raise Exception(err_msg)
+            else:
+                return '{}{}?source={}'.format(self.caching_server, urlparse(url).path, urlparse(url).netloc)
 
-        class MainStage3(object):
-            def __init__(self):
-                self.app_path = '/Applications/MainStage 3.app'
-                self.app_installed = os.path.exists(self.app_path)
-                if self.app_installed:
-                    self.app_plist = glob('{}/Contents/Resources/mainstage*.plist'.format(self.app_path))
-                    self.app_plist.sort()
-                    self.app_plist = self.app_plist[-1]  # Make sure this returns the latest plist if more than one exists.
-                    self.app_plist_basename = os.path.basename(self.app_plist)
-                else:
-                    self.app_plist = None
+        # An internal function that will check the response code of supplied url, and update the packages_to_process dictionary with new info
+        def updatePackageDetails(package):
+            # If a pkg_server is specified, check that the package exists on the server, if it does, add the status code.
+            # Note, this assumes anything but 200 is a failure.
+            http_status = self.requests.status(self.packages_to_process[package]['PackageURL'])  # Get the HTTP Status of the package url, and store for easy reference.
+            self.packages_to_process[package]['PackageHTTPStatus'] = http_status  # Create the PackageHTTPStatus entry in the packages_to_process dict for future reference.
+            package_url = self.packages_to_process[package]['PackageURL']
+            if self.pkg_server and not http_status == 200:
+                # If the status code isn't 200, then fall back to using the Apple servers, change the package URL, and check status code of Apple server.
+                new_package_url = package_url.replace(str(self.pkg_server), self.content_source.apple)
+                self.packages_to_process[package]['PackageURL'] = new_package_url
+                self.log.debug('HTTP Status {} for {}, fell back to {}'.format(http_status, package, new_package_url))
+                http_status = new_package_url  # Re-test the HTTP Status of the new URL
+                self.log.debug('HTTP Status {} for new URL {}'.format(http_status, new_package_url))
+            # else:
+            #     self.packages_to_process[package]['PackageHTTPStatus'] = self.requests.status(self.packages_to_process[package]['PackageURL'])
 
-        self.mainstage = MainStage3()
-        self.log.debug('MainStage3().app_path: {}, MainStage3().app_plist: {}, MainStage3().app_installed: {}'.format(self.mainstage.app_path, self.mainstage.app_plist, self.mainstage.app_installed))
+            # Get the size of the remote package, in bytes
+            if self.packages_to_process[package]['PackageHTTPStatus'] == 200:
+                self.packages_to_process[package]['size'] = self.requests.headers(self.packages_to_process[package]['PackageURL'])['content-length']
 
-    def URLResponds(self, url):
-        if Requests().response_code(url) == 200:
-            return True
+        # An internal function to check if the package is installed. For a bit more OS compatibility, this will only return an answer if the OS type is Darwin.
+        def packageInstalled(package_id):
+            '''Returns a dictionary of installed state and version.'''
+            # Default dict values to return
+            installed_result = {'installed': False, 'version': '0.0'}
+            if 'darwin' in sys.platform:
+                pkgutil = ['/usr/sbin/pkgutil', '--pkg-info-plist', package_id]
+                result, error = subprocess.Popen(pkgutil, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+                if result:
+                    installed_result['installed'], installed_result['version'] = True, '.'.join(str(readPlistFromString(result)['pkg-version']).split('.')[:3])  # Local version is awful version type to compare, example: 2.0.0.0.1.1447702152
+
+            return installed_result
+
+        # If the plist path starts with 'http', fetch from the provided URL and read direct from string, otherwise assume local path
+        if plist.startswith('http'):
+            packages = readPlistFromString(self.requests.fetch(plist))['Packages']
         else:
-            return False
+            packages = readPlist(plist)['Packages']
+
+        # Iterate over the resulting packages dictionary and start getting values for dropping into a dict.
+        for package in packages:
+            package_name = packages[package]['DownloadName']
+            package_basename = os.path.basename(package_name)
+            package_url = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, package_basename)
+            package_installed_size = packages[package].get('InstalledSize', None)
+            package_id = packages[package].get('PackageID'.replace('. ', '.'), None)  # Some Package ID's have a '. ' in the string, this is a typo.
+            package_version = str(float(packages[package].get('PackageVersion', 0.0)))  # Apple uses a long type here, but we're converting this so LooseVersion()/StrictVersion() can be used for comparison. Also, not all packages have a version number.
+            package_install_state = packageInstalled(package_id=package_id)
+            package_installed = package_install_state['installed']
+            package_local_version = package_install_state['version']
+            package_mandatory = packages[package].get('IsMandatory', False)  # Mandatory packages are True, if that doesn't exist, assume not required, so False.
+
+            # If the remote package version is greater than the local version and the package is installed, then the package needs updating, so change package_installed to False.
+            if LooseVersion(package_local_version) < LooseVersion(package_version) and package_installed:
+                package_installed = False
+
+            # Handle when a pkg_server is being used
+            if self.pkg_server:
+                package_url = '{}/lp10_ms3_content_2016/{}'.format(self.pkg_server, package_basename)
+
+            # Handle when a caching server is being used
+            if self.caching_server:
+                package_url = transformCacheServerURL(url=package_url)
+
+            # Handle when a loop path contains '../lp10_ms3_content_2013' and correct the package_url path
+            if '../lp10_ms3_content_2013/' in package_name:
+                package_url = package_url.replace('lp10_ms3_content_2016', 'lp10_ms3_content_2013')
+
+            if self.mirror_source_paths:
+                package_destination = os.path.join(self.destination, ''.join(package_url.partition('lp10')[1:]))  # Use partition to split on occurance of a particular string
+            elif not self.mirror_source_paths:
+                if package_mandatory:
+                    package_destination = os.path.join(self.destination, os.path.basename(plist), 'mandatory', package_basename)
+                elif not package_mandatory:
+                    package_destination = os.path.join(self.destination, os.path.basename(plist), 'optional', package_basename)
+
+            # If the package_basename does not already exist in the packages_to_process dictionary, add it
+            if package_basename not in self.packages_to_process.keys() and not badPackage(plist=os.path.basename(plist), package=package_basename):
+                self.packages_to_process[package_basename] = {
+                    'PackageName': package_basename.replace('.pkg', ''),
+                    'PackageURL': package_url,
+                    'PackageIsMandatory': package_mandatory,
+                    'PackageInstalledSize': package_installed_size,
+                    'PackageDestination': package_destination.replace('.plist', ''),
+                    'PackageID': package_id,
+                    'PackageRemoteVersion': package_version,
+                    'PackageLocalVersion': package_local_version,
+                    'PackageInstalled': package_installed,
+                }
+
+        # Concurrency for faster processing of URL's
+        if not self.debug_concurrency:
+            workers = 20
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                future_to_package = {executor.submit(updatePackageDetails, package): package for package in self.packages_to_process}
+                for future in concurrent.futures.as_completed(future_to_package):
+                    package = future_to_package[future]
+                    try:
+                        future.result()
+                    except Exception as exception:
+                        raise exception
+
+        if self.debug_concurrency:
+            for package in self.packages_to_process:
+                updatePackageDetails(package)
+
+        pprint(self.packages_to_process)
 
 
 def main():
-    appleloops = AppleLoops(debug=True)  # NOQA
+    class SaneUsageFormat(argparse.HelpFormatter):
+        '''Makes the help output somewhat more sane. Code used was from Matt Wilkie.'''
+        '''http://stackoverflow.com/questions/9642692/argparse-help-without-duplicate-allcaps/9643162#9643162'''
+
+        def _format_action_invocation(self, action):
+            if not action.option_strings:
+                default = self._get_default_metavar_for_positional(action)
+                metavar, = self._metavar_formatter(action, default)(1)
+                return metavar
+            else:
+                parts = []
+                # if the Optional doesn't take a value, format is:
+                #    -s, --long
+                if action.nargs == 0:
+                    parts.extend(action.option_strings)
+                # if the Optional takes a value, format is:
+                #    -s ARGS, --long ARGS
+                else:
+                    default = self._get_default_metavar_for_optional(action)
+                    args_string = self._format_args(action, default)
+                    for option_string in action.option_strings:
+                        parts.append(option_string)
+                    return '{} {}'.format(', '.join(parts), args_string)
+                return ', '.join(parts)
+
+        def _get_default_metavar_for_optional(self, action):
+            return action.dest.upper()
+
+    parser = argparse.ArgumentParser(formatter_class=SaneUsageFormat)
+
+    parser.add_argument('--apps', type=str, nargs='+', dest='apps', metavar='<app>', help='Processes packages available for the specified app.', choices=['garageband', 'logicpro', 'mainstage'], required=False)
+
+    args = parser.parse_args()
+
+    if not len(sys.argv) > 1:
+        parser.print_help()
+        sys.exit(0)
+    elif len(sys.argv) > 1:
+        if len(args.apps) > 1:
+            _apps = args.apps
+        else:
+            _apps = None
+
+        #    AppleLoops() arguments: allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5
+        # appleloops = AppleLoops(debug=True, apps=_apps, mirror_source_paths=False)  # NOQA
+        appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/')  # NOQA
+        # appleloops = AppleLoops(debug=True, apps=_apps, caching_server='http://example.org:8080')  # NOQA
+        appleloops.processPlist(appleloops.garageband.apple_plist_source)
 
 
 if __name__ == '__main__':
