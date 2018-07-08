@@ -240,7 +240,7 @@ class AppleLoops():
 
         # Audio Content: Apple URL, Mirror URL, and Cache URL
         class AudioContentSource(object):
-            '''Simple object that returns three attributes about audio content source.'''
+            '''Simple object that returns three attributes about audio content source. .apple, .cache, .github, .mirror'''
             def __init__(self, mirror=None, cache=None):
                 self.apple = 'http://audiocontentdownload.apple.com'  # This is the fall back in case there is no hosted mirror, or cache server is not supplied.
                 self.cache = cache  # For caching server, don't transform here.
@@ -251,7 +251,7 @@ class AppleLoops():
         self.log.debug('Apple Source URL: {}, Mirror Source URL: {}, Caching Server Source URL: {}'.format(self.content_source.apple, self.content_source.mirror, self.content_source.cache))
 
         def processLocalApp(application):
-            '''Internal function that Returns information about specified application if the application path exists'''
+            '''Internal function that Returns information about specified application if the application path exists. Takes application as an argument (example: processLocalApp(application='garageband'))'''
             app_paths = {'garageband': 'GarageBand.app', 'logicpro': 'Logic Pro X.app', 'mainstage': 'MainStage 3.app'}
             if application not in app_paths.keys():
                 raise Exception('Invalid application name. Choose from {}'.format(app_paths.keys()))
@@ -291,12 +291,12 @@ class AppleLoops():
         }
 
     def getSupportedPlists(self, application=None):
-        '''Returns a list of valid plists that can be used to download Apple\'s audio content'''
-        '''This can take a few moments to process.'''
+        '''Returns a list of valid plists that can be used to download Apple audio content. Takes application as an optional arg if only specific app is being checked.'''
         supported_apps = ['garageband', 'logicpro', 'mainstage']
         valid_plist_urls = []  # Empty list for all the valid plists to go into
 
         def supportedPlists():
+            '''Returns a list of generated URLs to check based on a range() specific to each app type.'''
             base_plist_url = 'http://audiocontentdownload.apple.com/lp10_ms3_content_2016'
             urls_to_check = []
             for app in supported_apps:
@@ -312,11 +312,12 @@ class AppleLoops():
             return urls_to_check
 
         def checkSupportedPlistURL(plist_url):
+            '''Checks if the plist exists at the specified URL. Only returns true if the server sends HTTP status code 200 response. Takes plist_url as argument.'''
             requests = Requests()
             if requests.status(url=plist_url) == 200 and plist_url not in valid_plist_urls:
                 valid_plist_urls.append(os.path.basename(plist_url))
 
-        # Populates the self.valid_plist_urls list that is used to identify what plists can be processed by this script.
+        # Populates the valid_plist_urls list that is used to identify what plists can be processed by this script.
         workers = 200  # 200 workers seems enough to get this job done quick enough, if this locks up your system, drop it back down to double digits.
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_url = {executor.submit(checkSupportedPlistURL, url): url for url in supportedPlists()}
@@ -335,7 +336,7 @@ class AppleLoops():
             return valid_plist_urls
 
     def processPlist(self, plist):
-        '''Processes a plist and returns data in the form of a dictionary.'''
+        '''Processes a plist and returns data in the form of a dictionary. Takes a plist as argument.'''
         process_msg = 'Processing plist from: {}'.format(plist)
         self.log.debug(process_msg)
         processed_plist_basename = os.path.basename(plist)  # Use this to seperate the dict self.packages_to_process into packages for each app
@@ -351,9 +352,8 @@ class AppleLoops():
                 self.log.debug('Bad package check: {}'.format(package))
                 return package in bad_packages[plist]
 
-        # An internal function to transform the Apple URL into a Cache Server friendly URL.
         def transformCacheServerURL(url):
-            '''Transforms a given URL into a URL that will pull through the Caching Server on the network'''
+            '''Transforms a given URL into a URL that will pull through the Caching Server on the network. Returns a string. Takes url as argument.'''
             if not url.startswith(self.content_source.apple):  # For caching, the source URL has to be the audiocontentdownload url.
                 err_msg = 'Package URL must start with {}'.format(self.content_source.apple)
                 self.log.debug(err_msg)
@@ -361,9 +361,8 @@ class AppleLoops():
             else:
                 return '{}{}?source={}'.format(self.caching_server, urlparse(url).path, urlparse(url).netloc)
 
-        # An internal function to check if the package is installed. For a bit more OS compatibility, this will only return an answer if the OS type is Darwin.
         def packageInstalled(package_id):
-            '''Returns a dictionary of installed state and version.'''
+            '''Returns dict('installed', 'version'). Takes package_id as argument. Only returns this if the sys.platform is darwin.'''
             # Default dict values to return
             installed_result = {'installed': False, 'version': '0.0'}
             if 'darwin' in sys.platform:
@@ -376,8 +375,8 @@ class AppleLoops():
 
             return installed_result
 
-        # An internal function that will check the response code of supplied url, and update the packages_to_process dictionary with new info
         def updatePackageDetails(package):
+            '''Gets HTTP status and download size. Takes package as argument.'''
             # If this isn't the self.create_links_only mode, do all the checks, other wise, just print the url
             # If a pkg_server is specified, check that the package exists on the server, if it does, add the status code.
             # Note, this assumes anything but 200 is a failure.
