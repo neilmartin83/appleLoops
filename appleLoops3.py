@@ -290,6 +290,27 @@ class AppleLoops():
             'mainstage': processLocalApp(application='mainstage'),
         }
 
+    @property
+    def freespace(self):
+        diskutil = ['/usr/sbin/diskutil', 'info', '-plist', '/']
+        (result, error) = subprocess.Popen(diskutil, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        try:
+            result = plistlib.readPlistFromString(result)
+        except Exception as e:
+            self.log.debug('Exception retriving disk info: {}'.format(e))
+            raise e
+
+    def humanReadableSize(self, file_size, precision=2):
+        suffixes = ['B', 'KB', 'MB', 'GB', 'TB']
+        suffix_index = 0
+        try:
+            while file_size > 1024 and suffix_index < 4:
+                suffix_index += 1
+                file_size = file_size / 1024.0
+            return '{:.{}f} {}'.format(file_size, precision, suffixes[suffix_index])
+        except:  # An exception can occur, but ignore it
+            pass
+
     def getSupportedPlists(self, application=None):
         '''Returns a list of valid plists that can be used to download Apple audio content. Takes application as an optional arg if only specific app is being checked.'''
         supported_apps = ['garageband', 'logicpro', 'mainstage']
@@ -364,14 +385,16 @@ class AppleLoops():
         def packageInstalled(package_id):
             '''Returns dict('installed', 'version'). Takes package_id as argument. Only returns this if the sys.platform is darwin.'''
             # Default dict values to return
-            installed_result = {'installed': False, 'version': '0.0'}
-            if 'darwin' in sys.platform:
+            installed_result = {'installed': False, 'version': '0.0'}  # Default assumption is pkg is not installed.
+            if 'darwin' in sys.platform:  # pkgutil really only exists on macOS systems, so don't run the install check if this isn't a macOS system.
                 pkgutil = ['/usr/sbin/pkgutil', '--pkg-info-plist', package_id]
                 result, error = subprocess.Popen(pkgutil, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
                 if result:
-                    installed_result['installed'], installed_result['version'] = True, '.'.join(str(readPlistFromString(result)['pkg-version']).split('.')[:3])  # Local version is awful version type to compare, example: 2.0.0.0.1.1447702152
+                    result = readPlistFromString(result)
+                    installed_result['installed'] = result.get('pkgid', False)
+                    installed_result['version'] = result.get('pkg-version', '0.0')  # The local version number is weird (example: 2.0.0.0.1.1447702152), so careful, dragons be near. May need to .split('.')[:3])
                 if error:
-                    self.log.debug('Error checking if package is installed: {}'.format(error))
+                    self.log.debug('{}'.format(error))  # Should only be an error when no pkgid is found
 
             return installed_result
 
@@ -481,6 +504,7 @@ class AppleLoops():
                         updatePackageDetails(_package)
 
     def displayPackageLinksOnly(self, plist):
+        '''Returns minimal package info to stdout in a faux csv format that will make for easy piping to csv file. No plans to implement a CSV file output presently. Takes plist as argument.'''
         print 'applicationPlist,packageUrl,packageDownloadSizeinBytes,packageInstalledSizeinBytes'
         for package in self.packages_to_process[os.path.basename(plist)]:
             application_plist = os.path.basename(plist)
