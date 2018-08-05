@@ -28,6 +28,8 @@ Requirements:
 # pylint: disable=W0611
 import argparse  # NOQA
 import concurrent.futures  # NOQA
+import csv  # NOQA
+import errno  # NOQA
 import logging  # NOQA
 import os  # NOQA
 import plistlib  # NOQA
@@ -163,80 +165,90 @@ class Requests():
 
 
 class AppleLoops():
-    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=None, apps_plist=None, caching_server=None, create_links_only=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=None, dry_run=True, force_deploy=False, force_dmg=False, hard_link_files=False, log_path=None, mandatory_pkgs=True, mirror_source_paths=True, http_proxy=None, https_proxy=None, quiet_download=False, optional_pkgs=False, pkg_server=None, quiet_mode=False, space_threshold=5):
-        if http_proxy:
-            self.http_proxy = http_proxy
+    def __init__(self, allow_insecure_https=False, allow_untrusted_pkgs=False, apps=False, apps_plist=False, caching_server=False, create_csv_file=False, debug=False, deployment_mode=False, destination='/tmp/appleloops', dmg_filename=False, dry_run=True, force_deploy=False, force_dmg=False, hard_link_files=False, http_basic_auth=False, http_proxy=False, https_proxy=False, log_directory=os.path.expanduser('~/Library/Logs'), mandatory_pkgs=True, mirror_source_paths=True, optional_pkgs=False, pkg_server=False, quiet_download=False, quiet_mode=False, space_threshold=5):
+        # Init class properties
+        self.allow_insecure_https = allow_insecure_https  # If an SSL/TLS certificate issue exists and you can 'trust' the issue, cURL will ignore SSL/TLS errors.
+        self.allow_untrusted_pkgs = allow_untrusted_pkgs  # If there is a certificate issue with the package, and you 'trust' the issue, installer will ignore the untrusted certificate when installing the package.
+        self.apps = apps  # Apps that are going to be processed. Example: ['garageband', 'mainstage']
+        self.apps_plist = apps_plist  # A list of specific plists to process. Example: ['garageband10120.plist', 'logicpro1040.plist']
+        self.caching_server = caching_server  # A caching server to use. Must be in the format of http://example.org:46545. man AssetCacheLocatorUtil to find out how to locate the correct URL.
+        self.create_csv_file = create_csv_file  # Only outputs the package URL's if a third party downloader is going to be used.
+        self.debug = debug  # Sets a higher level logging mode.
+        self.deployment_mode = deployment_mode  # Used to install the packages on a client machine.
+        self.destination = destination  # Location for files to be stored.
+        self.dmg_filename = dmg_filename  # Name of the DMG file to create if creating a DMG.
+        self.dry_run = dry_run  # Pretends to do things.
+        self.force_deploy = force_deploy  # Forcibly downloads and installs packages even if they've already been installed.
+        self.force_dmg = force_dmg  # Downloads packages and creates a DMG file even if one of the same name exists or not.
+        self.hard_link_files = hard_link_files  # Creates hard links to previously downloaded files if they exist (useful for saving space when downloading files for use elsewhere).
+        self.http_basic_auth = http_basic_auth  # Basic Authentication for local package mirror.
+        self.http_proxy = http_proxy  # If you need to deal with a http proxy.
+        self.https_proxy = https_proxy  # If you need to deal with a https proxy.
+        self.log_directory = log_directory.rstrip('/')  # Can specify an alternative directory to log to. Default is ~/Library/Logs - if you want to log to /var/logs you will need to run this as sudo.
+        self.log_file = os.path.join(self.log_directory, 'appleloops.log')  # The log filename to use. There is no argument to change this.
+        self.mandatory_pkgs = mandatory_pkgs  # Only download mandatory loops
+        self.mirror_source_paths = mirror_source_paths  # Mirrors the folder structure and file names as per source. Use this when creating a local package mirror.
+        self.optional_pkgs = optional_pkgs  # Only download optional loops.
+        self.pkg_server = pkg_server  # The local package mirror that a client will download packages from.
+        self.quiet_download = quiet_download  # No progress bar when downloading a package. A status message will still be output to stdout.
+        self.quiet_mode = quiet_mode  # No output to stdout at all.
+        self.space_threshold = space_threshold  # A percentage of disk space to reserve represented as an integer value.
+
+        # Strip trailing '/' char from caching server URL
+        if self.caching_server:
+            self.caching_server = self.caching_server.rstrip('/')
+
+        # If running in deployment mode, the destination must remain in a tmp locations
+        if self.deployment_mode:
+            self.destination = '/tmp/appleloops'
+
+        # Configure proxy in this environ.
+        if self.http_proxy:
             os.environ['HTTP_PROXY'], os.environ['http_proxy'] = self.http_proxy, self.http_proxy
 
-        if https_proxy:
-            self.https_proxy = https_proxy
+        if self.https_proxy:
             os.environ['HTTPS_PROXY'], os.environ['https_proxy'] = self.https_proxy, self.https_proxy
 
-        # Supported apps are
-        self.supported_apps = ['garageband', 'logicpro', 'mainstage']
         # Logging
-        if log_path:  # Log path will vary depending on context of who is using it, and what mode.
-            self.log_path = log_path  # Specifying a log path will override default locations.
-        else:
-            if os.getuid() is 0 or deployment_mode:  # If running as root, or in deployment mode, logs go to /var/log
-                self.log_path = '/var/log/'
-            else:
-                self.log_path = os.path.join(os.path.expanduser('~'), 'Library', 'Logs')  # This is chosen as log path for non root/deployment use to avoid needing to run with unnecessary privileges
-        # Create the log file path
-        self.log_file = os.path.join(self.log_path, 'appleloops.log')
+        if os.getuid() is 0 or deployment_mode:  # If running as root, or in deployment mode, logs go to /var/log
+            self.log_file = self.log_file.replace(self.log_directory, '/var/log')
+
         # Create an instance of the logger
         self.log = logging.getLogger('appleLoops')
-        # Debug is either True/False, but defaults to False
-        self.debug = debug
+
         # Set log level based on debug mode.
         if self.debug:
             self.log.setLevel(logging.DEBUG)
         else:
             self.log.setLevel(logging.INFO)
+
         # Set log format,
         self.file_handler = RotatingFileHandler(self.log_file)  # Dropped rotating on maxBytes and setting backupCount, not enough logging to warrant.
         self.log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         self.file_handler.setFormatter(self.log_format)
         self.log.addHandler(self.file_handler)
         self.log.info('Version: {}'.format(__version__))
-        # Setup other settings.
-        self.allow_insecure_https = allow_insecure_https  # Used to tell curl to ignore cert errors. Defaults to False
-        self.allow_untrusted_pkgs = allow_untrusted_pkgs  # When deploying apps, use this to ignore certificate errors when packages are installed
-        self.apps = apps  # A list of apps to do things with. Supported values are ['all', 'garageband', 'logicpro', 'mainstage']
-        self.apps_plist = apps_plist  # A list of specific plists to do things with, i.e. ['garageband1021.plist', 'logicpro1040.plist']
-        if caching_server:  # So .rstrip() can work, have to check if caching_server has a value.
-            self.caching_server = caching_server.rstrip('/')  # A caching server to use, must be in format of 'http://example.org:port' or 'http://10.0.0.1:port'
-        else:
-            self.caching_server = caching_server
-        self.create_links_only = create_links_only  # Only outputs links of the audio content so third party download tools can be used. Defaults to False.
-        self.deployment_mode = deployment_mode  # If True, will install packages. Defaults to False. Must run as user with permissions to install pkgs, typically root.
-        if not self.deployment_mode:
-            self.destination = destination  # The path that content will be downloaded to. Defaults to '/tmp/appleloops'. Deployment mode will always use '/tmp/appleloops'.
-        elif self.deployment_mode:
-            self.destination = '/tmp/appleloops'
-        self.dmg_filename = dmg_filename  # Filename used for creating DMG of content
-        self.dry_run = dry_run  # Provides output only of what would happen. Defaults to True.
-        self.force_deploy = force_deploy  # Re-installs packages regardless of whether they have been installed or not. Defaults to False.
-        self.force_dmg = force_dmg  # Re-creates the DMG file regardless of whether it exists or not.
-        self.hard_link_files = hard_link_files  # Creates hard links to files if they exist elsewhere. Defaults to False.
-        self.mandatory_pkgs = mandatory_pkgs  # Sets the flag to download/install the required packages for a given app. Defaults to True. This is a change from previous behaviour.
-        self.mirror_source_paths = mirror_source_paths  # This will mirror the folder structure of the Apple audiocontent.apple.com servers. Defaults to True. This is a change from previous behaviour.
-        self.quiet_download = quiet_download  # This will suppress the progress bar while downloading files. Default is False.
-        self.optional_pkgs = optional_pkgs  # Sets the flag to download/install the optional packages for a given app. Defaults to False.
-        if pkg_server:  # So .rstrip() can work, have to check if pkg_server has a value.
-            self.pkg_server = pkg_server.rstrip('/')  # Uses the specified local mirror of packages, must be in format of 'http://example.org/path/to/content'. Defaults to None. Removes any extraneous '/' char from end of argument value.
-        else:
-            self.pkg_server = pkg_server
-        self.quiet_mode = quiet_mode  # Suppresses all stdout/stderr output. To view info about a run, view the log file. Defaults to False.
-        self.space_threshold = space_threshold  # The percentage of disk free space to protect. Defaults to 5%. Must be an integer.
+
+        # Create an empty dict to store loops that need to be process
+        self.packages_to_process = {}
+
+        # Strip trailing '/' char from package server URL
+        if pkg_server:
+            self.pkg_server = self.pkg_server.rstrip('/')  # Uses the specified local mirror of packages, must be in format of 'http://example.org/path/to/content'. Defaults to None. Removes any extraneous '/' char from end of argument value.
+
         # Create an instance of Requests()
         self.requests = Requests(allow_insecure=self.allow_insecure_https)
+
+        # Supported apps are
+        self.supported_apps = ['garageband', 'logicpro', 'mainstage']
+
+        # set up the user agent string
+        self.user_agent = '{}/{}'.format(os.path.basename(__script__), __version__)
+
         # Debug log the class and what it was initialised with, as well as OS system type
         self.log.debug('System is {}'.format(sys.platform))
         self.log.debug(vars(AppleLoops))
         self.log.debug(self.__dict__)
-        # Create an empty dict to store loops that need to be process
-        self.packages_to_process = {}
 
         # Audio Content: Apple URL, Mirror URL, and Cache URL
         class AudioContentSource(object):
@@ -266,21 +278,19 @@ class AppleLoops():
                 plist_path.sort()  # Sort so if more than one exists, the last element should be the most recent plist file
                 app_result['app_path'] = app_path
                 app_result['plist_path'] = plist_path[-1]  # Return the most recent plist from the sorted list.
-
-            # These don't need the app to be installed to work.
-            app_result['plist_basename'] = os.path.basename(plist_path[-1])
-            app_result['apple_plist_source'] = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, os.path.basename(plist_path[-1]))
-            app_result['github_plist_source'] = '{}/{}'.format(self.content_source.github, os.path.basename(plist_path[-1]))
-            app_result['latest_apple_plist'] = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, self.getSupportedPlists(application=application)[-1])
+                app_result['plist_basename'] = os.path.basename(plist_path[-1])
+                app_result['apple_plist_source'] = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, os.path.basename(plist_path[-1]))
+                app_result['github_plist_source'] = '{}/{}'.format(self.content_source.github, os.path.basename(plist_path[-1]))
+                app_result['latest_apple_plist'] = '{}/lp10_ms3_content_2016/{}'.format(self.content_source.apple, self.getSupportedPlists(application=application)[-1])
 
             return Result(
                 app_installed=app_result.get('installed', False),
-                app_path=app_result.get('app_path', None),
-                local_plist=app_result.get('plist_path', None),
-                plist_basename=app_result.get('plist_basename', None),
-                apple_plist_source=app_result.get('apple_plist_source', None),
-                github_plist_source=app_result.get('github_plist_source', None),
-                latest_apple_plist=app_result.get('latest_apple_plist', None),
+                app_path=app_result.get('app_path', False),
+                local_plist=app_result.get('plist_path', False),
+                plist_basename=app_result.get('plist_basename', False),
+                apple_plist_source=app_result.get('apple_plist_source', False),
+                github_plist_source=app_result.get('github_plist_source', False),
+                latest_apple_plist=app_result.get('latest_apple_plist', False),
             )
 
         # Create the info for each local app identifying if installed, plist path, etc, and put it into a dict
@@ -400,7 +410,7 @@ class AppleLoops():
 
         def updatePackageDetails(package):
             '''Gets HTTP status and download size. Takes package as argument.'''
-            # If this isn't the self.create_links_only mode, do all the checks, other wise, just print the url
+            # If this isn't the self.create_csv_file mode, do all the checks, other wise, just print the url
             # If a pkg_server is specified, check that the package exists on the server, if it does, add the status code.
             # Note, this assumes anything but 200 is a failure.
             http_status = self.requests.status(self.packages_to_process[processed_plist_basename][package]['PackageURL'])  # Get the HTTP Status of the package url, and store for easy reference.
@@ -448,12 +458,12 @@ class AppleLoops():
             if LooseVersion(package_local_version) < LooseVersion(package_version) and package_installed:
                 package_installed = False
 
-            # Handle when a pkg_server is being used
-            if self.pkg_server:
+            # Handle when a pkg_server is being used but not when self.create_csv_file is true.
+            if self.pkg_server and not self.create_csv_file:
                 package_url = '{}/lp10_ms3_content_2016/{}'.format(self.pkg_server, package_basename)
 
-            # Handle when a caching server is being used
-            if self.caching_server:
+            # Handle when a caching server is being used but not when self.create_csv_file is true.
+            if self.caching_server and not self.create_csv_file:
                 package_url = transformCacheServerURL(url=package_url)
 
             # Handle when a loop path contains '../lp10_ms3_content_2013' and correct the package_url path
@@ -503,16 +513,53 @@ class AppleLoops():
                     for _package in self.packages_to_process[processed_plist_basename]:
                         updatePackageDetails(_package)
 
-    def displayPackageLinksOnly(self, plist):
-        '''Returns minimal package info to stdout in a faux csv format that will make for easy piping to csv file. No plans to implement a CSV file output presently. Takes plist as argument.'''
-        print 'applicationPlist,packageUrl,packageDownloadSizeinBytes,packageInstalledSizeinBytes'
-        for package in self.packages_to_process[os.path.basename(plist)]:
-            application_plist = os.path.basename(plist)
-            package_detail = self.packages_to_process[application_plist][package]
-            package_url = package_detail['PackageURL']
-            package_download_size = package_detail['PackageSize']
-            package_installed_size = package_detail['PackageInstalledSize']
-            print '{},{},{},{}'.format(application_plist, package_url, package_download_size, package_installed_size)
+    def createPackageLinksCSVFile(self, plist):
+        '''Creates a CSV file using the plist name as the filename and stores it in the destination provided with the class destination argument.'''
+        csv_filename = os.path.join(self.destination, os.path.basename(plist.replace('.plist', '.csv')))  # Write to current directory
+        csv_header = ['packageURL', 'packageDownloadSizeInBytes', 'packageInstalledSizeInBytes']
+
+        # Make destination folder if it doesn't exist
+        if not os.path.exists(self.destination):
+            try:
+                os.makedirs(self.destination)
+            except OSError as error:  # Stops a race condition if the directory is created between the os.path.exists() and os.makedirs() by sheer luck
+                if error.errno != errno.EEXIST:
+                    raise
+
+        # Make the CSV file happen
+        with open(csv_filename, 'wb') as csv_file:
+            writer = csv.writer(csv_file, delimiter=',', quoting=csv.QUOTE_ALL)
+            writer.writerow(csv_header)
+            for package in self.packages_to_process[os.path.basename(plist)]:
+                package_detail = self.packages_to_process[os.path.basename(plist)][package]
+                line = [package_detail['PackageURL'], package_detail['PackageSize'], package_detail['PackageInstalledSize']]
+                writer.writerow(line)
+        print 'File saved to: {}'.format(csv_filename)
+        # print 'applicationPlist,packageUrl,packageDownloadSizeinBytes,packageInstalledSizeinBytes'
+        # for package in self.packages_to_process[os.path.basename(plist)]:
+        #     application_plist = os.path.basename(plist)
+        #     package_detail = self.packages_to_process[application_plist][package]
+        #     package_url = package_detail['PackageURL']
+        #     package_download_size = package_detail['PackageSize']
+        #     package_installed_size = package_detail['PackageInstalledSize']
+        #     print '{},{},{},{}'.format(application_plist, package_url, package_download_size, package_installed_size)
+
+    def downloadPackage(self, package):
+        '''Downloads the supplied package. Subprocesses out to cURL. Best effort made by cURL to resume any existing incomplete downloads, but only if supported by source.'''
+        # Basic command path for the subprocess
+        curl = ['/usr/bin/curl']
+
+        # Start building out the full cURL command
+        if self.allow_insecure_https:  # Only use if absolutely necessary
+            curl.append('--insecure')
+
+        if self.quiet_mode:
+            curl.append('--silent')  # No progress bar, no cURL output at all
+        else:
+            curl.append('--progress-bar')  # Use progress bar
+
+        # Build out remaining common args
+        curl.extend(['-L', '-C', '-', package.PackageURL, '--create-dirs', package.PackageDestination, '--user-agent', self.user_agent])
 
     def main_processor(self):
         # When processing self.apps, don't run it with self.apps_plist because strange things happen, when you're going round the twist.
@@ -521,18 +568,18 @@ class AppleLoops():
                 if app in self.supported_apps:
                     if not self.local_apps[app].app_installed:
                         # Get the latest loops fresh hot and steamy from Apple
-                        if not self.create_links_only or self.quiet_mode:
+                        if not self.create_csv_file or self.quiet_mode:
                             print 'Processing latest Apple audio content from {}'.format(self.local_apps[app].latest_apple_plist)
                         self.processPlist(plist=self.local_apps[app].latest_apple_plist)
-                        if self.create_links_only:
-                            self.displayPackageLinksOnly(self.local_apps[app].latest_apple_plist)
+                        if self.create_csv_file:
+                            self.createPackageLinksCSVFile(self.local_apps[app].latest_apple_plist)
                     elif self.local_apps[app].app_installed:
                         # Get the latest loops fresh hot and steamy from the installed plist file
-                        if not self.create_links_only or self.quiet_mode:
+                        if not self.create_csv_file or self.quiet_mode:
                             print 'Processing latest Apple audio content from local file {}'.format(self.local_apps[app].local_plist)
                         self.processPlist(plist=self.local_apps[app].local_plist)
-                        if self.create_links_only:
-                            self.displayPackageLinksOnly(self.local_apps[app].local_plist)
+                        if self.create_csv_file:
+                            self.createPackageLinksCSVFile(self.local_apps[app].local_plist)
 
 
 def main():
@@ -578,9 +625,10 @@ def main():
     supported_plist_exclusive_group.add_argument('--supported-plists', action='store_true', dest='show_supported_plists', help='Retrieves a list of supported plists direct from Apple\'s servers', required=False)
 
     # Arguments that can mix together belong here.
-    parser.add_argument('--display-urls', action='store_true', dest='display_urls', default=False, help='Output URLs with some basic info in CSV format.', required=False)
+    parser.add_argument('--create-csv', action='store_true', dest='create_csv', default=False, help='Output URLs with some basic info in CSV format.', required=False)
     parser.add_argument('--http-proxy', type=str, nargs=1, dest='http_proxy', metavar='<http proxy>', default=False, help='Specify the http proxy for your network: http://<user>:<pass>@example.org:8080', required=False)
     parser.add_argument('--https-proxy', type=str, nargs=1, dest='https_proxy', metavar='<https proxy>', default=False, help='Specify the https proxy for your network: https://<user>:<pass>@example.org:8080', required=False)
+    parser.add_argument('--http-auth', type=str, nargs=1, dest='http_auth', metavar='<basic auth>', default=False, help='Provide basic auth credentials for use with your local http/https mirror. Must be base64 encoded.', required=False)
 
     # Parse the args
     args = parser.parse_args()
@@ -607,7 +655,7 @@ def main():
         else:
             _apps = None
 
-        _display_urls = args.display_urls
+        _create_csv = args.create_csv
 
         if args.http_proxy:
             _http_proxy = args.http_proxy[0]
@@ -619,10 +667,11 @@ def main():
         else:
             _https_proxy = False
 
-        # appleloops = AppleLoops(allow_insecure_https=_allow_insecure_https, allow_untrusted_pkgs=_allow_untrusted_pkgs, apps=_apps, apps_plist=_apps_plist, caching_server=_caching_server, create_links_only=_create_links_only, debug=_debug, deployment_mode=_deployment_mode, destination=_destination, dmg_filename=_dmg_filename, dry_run=_dry_run, force_deploy=_force_deploy, force_dmg=_force_dmg, hard_link_files=_hard_link, log_path=_log_path, mandatory_pkgs=_mandatory, mirror_source_paths=_mirror_source_paths, http_proxy=_http_proxy, https_proxy=_https_proxy, quiet_download=_quiet_download, optional_pkgs=_optional_pkgs, pkg_server=_pkg_server, quiet_mode=_quiet_mode, space_threshold=_space_threshold)
+        # appleloops = AppleLoops(allow_insecure_https=_allow_insecure_https, allow_untrusted_pkgs=_allow_untrusted_pkgs, apps=_apps, apps_plist=_apps_plist, caching_server=_caching_server, create_csv_file=_create_csv_file, debug=_debug, deployment_mode=_deployment_mode, destination=_destination, dmg_filename=_dmg_filename, dry_run=_dry_run, force_deploy=_force_deploy, force_dmg=_force_dmg, hard_link_files=_hard_link, log_path=_log_path, mandatory_pkgs=_mandatory, mirror_source_paths=_mirror_source_paths, http_proxy=_http_proxy, https_proxy=_https_proxy, quiet_download=_quiet_download, optional_pkgs=_optional_pkgs, pkg_server=_pkg_server, quiet_mode=_quiet_mode, space_threshold=_space_threshold)
         # appleloops = AppleLoops(debug=True, apps=_apps, mirror_source_paths=False)  # NOQA
-        # appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/', http_proxy=_http_proxy, https_proxy=_https_proxy, create_links_only=_display_urls)  # NOQA
-        appleloops = AppleLoops(debug=True, apps=_apps, http_proxy=_http_proxy, https_proxy=_https_proxy, create_links_only=_display_urls)  # NOQA
+        appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/', create_csv_file=_create_csv)  # NOQA
+        # appleloops = AppleLoops(debug=True, apps=_apps, pkg_server='http://example.org/audiocontentdownload/', http_proxy=_http_proxy, https_proxy=_https_proxy, create_csv_file=_create_csv)  # NOQA
+        # appleloops = AppleLoops(debug=True, apps=_apps, http_proxy=_http_proxy, https_proxy=_https_proxy, create_csv_file=_create_csv)  # NOQA
         # appleloops = AppleLoops(debug=True, apps=_apps, caching_server='http://example.org:8080')  # NOQA
         # appleloops.processPlist(appleloops.garageband.apple_plist_source)
         appleloops.main_processor()
