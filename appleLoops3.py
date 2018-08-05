@@ -377,7 +377,7 @@ class AppleLoops():
             '''Returns True if a package should not be downloaded for whatever reason.'''
             # After GarageBand 10.3+ release, there's a bunch of loops that are downloaded but don't install due to not finding a qualifying package for mainstage and logicpro
             bad_packages = {
-                'garageband1021.plist': ['JamPack4_Instruments.pkg', 'MAContent10_AppleLoopsLegacy1.pkg', 'MAContent10_AppleLoopsLegacyRemix.pkg', 'MAContent10_AppleLoopsLegacyRhythm.pkg', 'MAContent10_AppleLoopsLegacySymphony.pkg', 'MAContent10_AppleLoopsLegacyVoices.pkg', 'MAContent10_AppleLoopsLegacyWorld.pkg', 'MAContent10_AssetPack_0326_AppleLoopsJamPack1.pkg', 'MAContent10_GarageBand6Legacy.pkg', 'MAContent10_IRsSurround.pkg', 'MAContent10_Logic9Legacy.pkg', 'RemixTools_Instruments.pkg', 'RhythmSection_Instruments.pkg', 'Voices_Instruments.pkg', 'WorldMusic_Instruments.pkg'],
+                'garageband1021.plist': ['JamPack1.pkg' 'JamPack4_Instruments.pkg', 'MAContent10_AppleLoopsLegacy1.pkg', 'MAContent10_AppleLoopsLegacyRemix.pkg', 'MAContent10_AppleLoopsLegacyRhythm.pkg', 'MAContent10_AppleLoopsLegacySymphony.pkg', 'MAContent10_AppleLoopsLegacyVoices.pkg', 'MAContent10_AppleLoopsLegacyWorld.pkg', 'MAContent10_GarageBand6Legacy.pkg', 'MAContent10_IRsSurround.pkg', 'MAContent10_Logic9Legacy.pkg', 'RemixTools_Instruments.pkg', 'RhythmSection_Instruments.pkg', 'Voices_Instruments.pkg', 'WorldMusic_Instruments.pkg'],
             }
             if plist in bad_packages.keys() and package in bad_packages[plist]:
                 self.log.debug('Bad package check: {}'.format(package))
