@@ -58,8 +58,8 @@ __author__ = 'Carl Windus'
 __maintainer__ = __author__
 __copyright__ = 'Copyright 2016, Carl Windus'
 __credits__ = ['Greg Neagle', 'Matt Wilkie']
-__version__ = '2.2.2'
-__date__ = '2018-07-03'
+__version__ = '2.2.3'
+__date__ = '2018-08-05'
 
 __license__ = 'Apache License, Version 2.0'
 __github__ = 'https://github.com/carlashley/appleLoops'
@@ -862,6 +862,7 @@ class AppleLoops():
             if loop not in loops:
                 # After GarageBand 10.3+ release, there's a bunch of loops that are downloaded but don't install due to not finding a qualifying package for mainstage and logicpro
                 garageband1021_failures = [
+                    'JamPack1.pkg',
                     'JamPack4_Instruments.pkg',
                     'MAContent10_AppleLoopsLegacy1.pkg',
                     'MAContent10_AppleLoopsLegacyRemix.pkg',
@@ -869,7 +870,6 @@ class AppleLoops():
                     'MAContent10_AppleLoopsLegacySymphony.pkg',
                     'MAContent10_AppleLoopsLegacyVoices.pkg',
                     'MAContent10_AppleLoopsLegacyWorld.pkg',
-                    'MAContent10_AssetPack_0326_AppleLoopsJamPack1.pkg',
                     'MAContent10_GarageBand6Legacy.pkg',
                     'MAContent10_IRsSurround.pkg',
                     'MAContent10_Logic9Legacy.pkg',
