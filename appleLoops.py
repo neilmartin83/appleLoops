@@ -162,7 +162,7 @@ class AppleLoops():
     '''
     Manages downloads and installs of Apple audio loops for GarageBand,
     Logic Pro X, and MainStage.
-    
+
     Initialisations:
         apps: A list, values should be any/all of: ['garageband', 'logicpro', 'mainstage']  # NOQA
         apps_plist: A list, values should be a specific plist to process, i.e. garageband1020.plist  # NOQA
@@ -183,7 +183,7 @@ class AppleLoops():
                         Default is False.
         quiet: Boolean, disables all stdout and stderr.
                Default is False. Replaces JSS mode in older versions.
-                     
+
     '''
     def __init__(self, allow_insecure=False, allow_untrusted=False,
                  apps=None, apps_plist=None, caching_server=None,
@@ -361,7 +361,7 @@ class AppleLoops():
         # If A pkg_server has been specified, and the test for falling
         # back to a self hosted config has worked, then use the self
         # hosted plists as fallback
-        self.base_url = 'http://audiocontentdownload.apple.com/lp10_ms3_content_'  # NOQA
+        self.base_url = 'https://audiocontentdownload.apple.com/lp10_ms3_content_'  # NOQA
 
         # Configure alt base url
         if self.pkg_server:
@@ -730,7 +730,7 @@ class AppleLoops():
                 if '2013' in _pkg_name and self.mirror_paths:
                     _pkg_destination_folder_year = '2013'
 
-                _pkg_url = 'http://audiocontentdownload.apple.com/%s' % _pkg_name[3:]  # NOQA
+                _pkg_url = 'https://audiocontentdownload.apple.com/%s' % _pkg_name[3:]  # NOQA
                 _pkg_name = os.path.basename(_pkg_name)
 
             # Reformat URL if caching server specified
@@ -750,7 +750,7 @@ class AppleLoops():
                 if not self.caching_server:
                     # Test each package path if pkg_server is provided, fallback if not reachable  # NOQA
                     try:
-                        mirrored_url = _pkg_url.replace('http://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
+                        mirrored_url = _pkg_url.replace('https://audiocontentdownload.apple.com', self.pkg_server)  # NOQA
                         if self.request.response_code(mirrored_url) == 200:  # NOQA
                             _pkg_url = mirrored_url
                         else:
